@@ -1,0 +1,47 @@
+[build-system]
+requires = [
+    "setuptools>=78.1.0",
+    "wheel>=0.44.0",
+    "scikit-build>=0.18.1",
+    "packaging>=24.2",
+    "distro>=1.9.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camera-pipeline-processor"
+version = "0.1.0"
+description = "Processador de Pipeline de Câmera com C/C++ e Python"
+readme = "README.md"
+authors = [
+    {name = "Leandro", email = "leandrozanatta27@gmail.com"},
+]
+requires-python = ">=3.8"
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: C",
+]
+dependencies = [
+    "numpy==2.2.4",
+    "opencv-python==4.11.0.86",
+    "PySide6==6.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/leandroZanatta/camera-pipeline"
+Repository = "https://github.com/leandroZanatta/camera-pipeline.git"
+
+[tool.setuptools]
+packages = ["core"]
+package-data = {core = ["*.so", "*.dll"]}
+
+[tool.scikit-build]
+cmake.source-dir = "c_src"
+cmake.install-dir = "core/camera_processor" 
