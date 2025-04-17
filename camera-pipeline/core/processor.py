@@ -31,7 +31,7 @@ from .c_interface import (
 )
 
 # Importar interfaces de callback
-from .callbacks import FrameCallback, StatusCallback
+from .callbacks import FrameCallback, StatusCallback, SimpleFrameCallback, SimpleStatusCallback, FrameType
 
 # Configurar logging para este módulo
 # Use a configuração de logging do main.py ou de um módulo de config
@@ -333,6 +333,27 @@ class CameraProcessor:
             # Retorna uma cópia rasa, o suficiente pois os arrays NumPy já são cópias
             return dict(self._latest_frames)
 
+    # Utilitário para converter funções de callback em objetos de interface
+    def _adapt_frame_callback(self, callback):
+        """Converte uma função de callback em um objeto FrameCallback."""
+        if isinstance(callback, FrameCallback):
+            return callback
+        elif callable(callback):
+            return SimpleFrameCallback(callback)
+        else:
+            return None
+
+    def _adapt_status_callback(self, callback):
+        """Converte uma função de callback em um objeto StatusCallback."""
+        if callback is None:
+            return None
+        elif isinstance(callback, StatusCallback):
+            return callback
+        elif callable(callback):
+            return SimpleStatusCallback(callback)
+        else:
+            return None
+
     def register_camera(
         self,
         url: str,
@@ -360,6 +381,18 @@ class CameraProcessor:
         if frame_callback is None:
             logger.error("Callback de frame é obrigatório")
             return -3  # Código de erro: parâmetros inválidos
+
+        # Converter função para interface se necessário
+        adapted_frame_callback = self._adapt_frame_callback(frame_callback)
+        if adapted_frame_callback is None:
+            logger.error("O callback de frame deve ser uma instância de FrameCallback ou uma função")
+            return -3
+
+        # Converter função para interface se necessário para status
+        adapted_status_callback = self._adapt_status_callback(status_callback)
+        if status_callback is not None and adapted_status_callback is None:
+            logger.error("O callback de status deve ser uma instância de StatusCallback, uma função ou None")
+            return -3
 
         with self._state_lock:
             if not self._processor_initialized:
@@ -400,9 +433,9 @@ class CameraProcessor:
                         "status": STATUS_CONNECTING,  # Estado inicial inferido
                     }
                     # Registrar os callbacks
-                    self._frame_callbacks[camera_id] = frame_callback
-                    if status_callback is not None:
-                        self._status_callbacks[camera_id] = status_callback
+                    self._frame_callbacks[camera_id] = adapted_frame_callback
+                    if adapted_status_callback is not None:
+                        self._status_callbacks[camera_id] = adapted_status_callback
                     return camera_id
                 else:
                     # Códigos de erro C: -1 (não inicializado), -2 (sem slots), -3 (URL inválida), -5 (erro thread)
@@ -435,6 +468,12 @@ class CameraProcessor:
             logger.error("Callback de frame não pode ser None")
             return False
 
+        # Converter função para interface se necessário
+        adapted_callback = self._adapt_frame_callback(callback)
+        if adapted_callback is None:
+            logger.error("O callback deve ser uma instância de FrameCallback ou uma função")
+            return False
+
         with self._state_lock:
             if camera_id not in self._active_cameras:
                 logger.warning(
@@ -442,7 +481,7 @@ class CameraProcessor:
                 )
                 return False
 
-            self._frame_callbacks[camera_id] = callback
+            self._frame_callbacks[camera_id] = adapted_callback
             logger.info(f"Callback de frame definido para câmera ID {camera_id}")
             return True
 
@@ -475,7 +514,13 @@ class CameraProcessor:
                 if camera_id in self._status_callbacks:
                     del self._status_callbacks[camera_id]
             else:
-                self._status_callbacks[camera_id] = callback
+                # Converter função para interface se necessário
+                adapted_callback = self._adapt_status_callback(callback)
+                if adapted_callback is None:
+                    logger.error("O callback deve ser uma instância de StatusCallback, uma função ou None")
+                    return False
+
+                self._status_callbacks[camera_id] = adapted_callback
 
             logger.info(
                 f"Callback de status {'removido' if callback is None else 'definido'} para câmera ID {camera_id}"
