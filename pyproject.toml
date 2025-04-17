@@ -5,6 +5,8 @@ requires = [
     "scikit-build>=0.18.1",
     "packaging>=24.2",
     "distro>=1.9.0",
+    "cmake>=3.10.0",
+    "ninja",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -17,11 +19,10 @@ authors = [
     {name = "Leandro", email = "leandrozanatta27@gmail.com"},
 ]
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -39,9 +40,13 @@ Homepage = "https://github.com/leandroZanatta/camera-pipeline"
 Repository = "https://github.com/leandroZanatta/camera-pipeline.git"
 
 [tool.setuptools]
-packages = ["core"]
-package-data = {core = ["*.so", "*.dll"]}
+packages = ["camera_pipeline", "camera_pipeline.core"]
+package-data = {camera_pipeline = ["core/*.so", "core/*.dll", "core/camera_processor/*.so", "core/camera_processor/*.dll"]}
+include-package-data = true
 
 [tool.scikit-build]
 cmake.source-dir = "c_src"
-cmake.install-dir = "core/camera_processor" 
+cmake.install-dir = "camera_pipeline/core/camera_processor"
+cmake.build-type = "Release"
+cmake.verbose = true
+wheel.expand-macos-universal-tags = true 

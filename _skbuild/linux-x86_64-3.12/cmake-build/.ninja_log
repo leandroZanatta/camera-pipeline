@@ -1,7 +1,0 @@
-# ninja log v5
-2	93	1744851720300286502	CMakeFiles/camera_processor.dir/src/logger.c.o	7e173fd00014c9ff
-1	109	1744851720317286655	CMakeFiles/camera_processor.dir/src/camera_processor.c.o	399b896815879340
-2	122	1744851720329286763	CMakeFiles/camera_processor.dir/src/callback_utils.c.o	99039252d98623b3
-3	211	1744851720418287566	CMakeFiles/camera_processor.dir/src/camera_thread.c.o	5a318e7f88e92a02
-211	282	1744851720487288189	libcamera_processor.so	3cefad740892746a
-282	314	0	CMakeFiles/install.util	1cf5c06bdfbb4b8d

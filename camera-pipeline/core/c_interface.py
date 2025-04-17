@@ -75,9 +75,18 @@ FRAME_CALLBACK_FUNC_TYPE = ctypes.CFUNCTYPE(
 def _find_library_path():
     """Tenta localizar a biblioteca C compilada."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Navega duas vezes para cima (de core/ para python_src/, depois para camera_pipeline/)
-    base_dir = os.path.abspath(os.path.join(script_dir, '..', '..')) 
-    lib_folder = os.path.join(base_dir, 'c_src', 'build')
+    
+    # Lista de possíveis locais para a biblioteca
+    possible_locations = [
+        # 1. Diretório camera_processor no pacote instalado
+        os.path.join(script_dir, 'camera_processor'),
+        
+        # 2. No mesmo diretório do script (core/)
+        script_dir,
+        
+        # 3. Diretório de build do C (para desenvolvimento)
+        os.path.join(os.path.dirname(script_dir), 'c_src', 'build')
+    ]
     
     if platform.system() == "Windows":
         lib_name = "camera_processor.dll"
@@ -86,9 +95,17 @@ def _find_library_path():
     else: # Linux e outros
         lib_name = "libcamera_processor.so"
     
-    full_path = os.path.join(lib_folder, lib_name)
-    print(f"[C Interface] Tentando carregar lib de: {full_path}")
-    return full_path
+    # Tenta cada possível localização
+    for location in possible_locations:
+        full_path = os.path.join(location, lib_name)
+        if os.path.exists(full_path):
+            print(f"[C Interface] Biblioteca encontrada em: {full_path}")
+            return full_path
+    
+    # Se não encontrou, retorna o caminho padrão (que mostrará mensagem de erro)
+    default_path = os.path.join(possible_locations[0], lib_name)
+    print(f"[C Interface] Biblioteca não encontrada. Tentando usar: {default_path}")
+    return default_path
 
 def _load_c_library(lib_path):
     """Carrega a DLL/SO e retorna a instância ou None em caso de falha."""
