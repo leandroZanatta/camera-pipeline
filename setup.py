@@ -50,7 +50,7 @@ setup(
     ],
     include_package_data=True,       # Importante para incluir arquivos não-python (como o .so)
     install_requires=[
-        "numpy==2.2.4",
+        "numpy>=1.26.4",
         "opencv-python==4.11.0.86",
         "PySide6==6.9.0",
     ],
