@@ -7,13 +7,36 @@ Este projeto implementa um pipeline para processar múltiplos streams de vídeo 
 ### Via pip (recomendado)
 
 ```bash
+# Instalação básica (apenas opencv-python)
 pip install camera-pipeline-processor
+
+# Instalação com suporte a NumPy
+pip install camera-pipeline-processor[numpy]
+
+# Instalação com suporte a interface gráfica (PySide6)
+pip install camera-pipeline-processor[ui]
+
+# Instalação completa com todas as dependências opcionais
+pip install camera-pipeline-processor[full]
+
+# Instalação para desenvolvimento
+pip install camera-pipeline-processor[dev]
 ```
 
 ### Diretamente do GitHub
 
 ```bash
+# Instalação básica
 pip install git+https://github.com/leandroZanatta/camera-pipeline.git
+
+# Instalação com suporte a NumPy
+pip install git+https://github.com/leandroZanatta/camera-pipeline.git#egg=camera-pipeline-processor[numpy]
+
+# Instalação com suporte a interface gráfica (PySide6)
+pip install git+https://github.com/leandroZanatta/camera-pipeline.git#egg=camera-pipeline-processor[ui]
+
+# Instalação completa com todas as dependências opcionais
+pip install git+https://github.com/leandroZanatta/camera-pipeline.git#egg=camera-pipeline-processor[full]
 ```
 
 ### Instalação para Desenvolvimento
@@ -21,8 +44,15 @@ pip install git+https://github.com/leandroZanatta/camera-pipeline.git
 ```bash
 git clone https://github.com/leandroZanatta/camera-pipeline.git
 cd camera-pipeline
-pip install -e .
+pip install -e ".[dev]"
 ```
+
+## Dependências Opcionais
+
+- **numpy**: Necessário para processamento de imagem e arrays numéricos eficientes (>= 1.26.4)
+- **PySide6**: Necessário para componentes de interface gráfica
+- **dev**: Inclui ferramentas para desenvolvimento (pytest, black, flake8)
+- **full**: Inclui todas as dependências opcionais
 
 ## Arquitetura
 
@@ -33,7 +63,7 @@ pip install -e .
     -   Gerenciar threads (um por câmera).
     -   Implementar buffer de frames e lógica de reconexão.
     -   Enviar frames decodificados e status para Python via callbacks.
--   **`core/`**: Contém o código Python que:
+-   **`camera_pipeline/core/`**: Contém o código Python que:
     -   Usa `ctypes` para carregar e interagir com a biblioteca C.
     -   Fornece URLs das câmeras para a biblioteca C.
     -   Define funções de callback Python para receber frames (YUV) e status.
@@ -42,7 +72,7 @@ pip install -e .
 ## Como Usar
 
 ```python
-from core.processor import CameraProcessor
+from camera_pipeline.core.processor import CameraProcessor
 
 # Inicializar o processador
 processor = CameraProcessor()

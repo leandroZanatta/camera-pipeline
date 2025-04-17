@@ -30,10 +30,15 @@ classifiers = [
     "Programming Language :: C",
 ]
 dependencies = [
-    "numpy==2.2.4",
     "opencv-python==4.11.0.86",
-    "PySide6==6.9.0",
 ]
+
+[project.optional-dependencies]
+numpy = ["numpy>=1.26.4"]
+ui = ["PySide6"]
+dev = ["pytest", "black", "flake8"]
+test = ["pytest"]
+full = ["numpy>=1.26.4", "PySide6"]
 
 [project.urls]
 Homepage = "https://github.com/leandroZanatta/camera-pipeline"

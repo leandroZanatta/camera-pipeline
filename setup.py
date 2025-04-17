@@ -50,13 +50,14 @@ setup(
     ],
     include_package_data=True,       # Importante para incluir arquivos não-python (como o .so)
     install_requires=[
-        "numpy>=1.26.4",
         "opencv-python==4.11.0.86",
-        "PySide6==6.9.0",
     ],
     extras_require={
+        "numpy": ["numpy>=1.26.4"],
+        "ui": ["PySide6"],
         "dev": ["pytest", "black", "flake8"],
         "test": ["pytest"],
+        "full": ["numpy>=1.26.4", "PySide6"],
     },
     python_requires=">=3.8",        # Versão mínima do Python
     classifiers=[
