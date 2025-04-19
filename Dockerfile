@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
 # Diretório de trabalho
 WORKDIR /app
 
+RUN pip install --upgrade pip
+
 # Clonar o repositório
 RUN git clone https://github.com/leandroZanatta/camera-pipeline.git .
 
