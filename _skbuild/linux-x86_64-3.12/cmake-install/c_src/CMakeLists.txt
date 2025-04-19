@@ -55,9 +55,9 @@ if(UNIX)
         set(ORIGIN "$ORIGIN")
     endif()
     
-    # Configurar RPATH para procurar na mesma pasta
+    # Configurar RPATH para procurar nas pastas "lib" e "." relativas ao local da biblioteca
     set_target_properties(camera_pipeline_c PROPERTIES
-        INSTALL_RPATH "${ORIGIN}"
+        INSTALL_RPATH "${ORIGIN}/lib;${ORIGIN}"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
 endif()

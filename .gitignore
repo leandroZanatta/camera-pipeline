@@ -3,10 +3,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
+# C extensions - MODIFICADO PARA PERMITIR ALGUMAS BIBLIOTECAS
+# Ignorar bibliotecas C, mas não as bibliotecas específicas do pacote
 *.so
 *.pyd
 *.dll
+*.dylib
+# Exceções: permitir bibliotecas necessárias para o pacote
+!camera_pipeline/core/camera_processor/*.so
+!camera_pipeline/core/camera_processor/lib/*.so*
+!camera_pipeline/core/camera_processor/lib/*.dll*
+!camera_pipeline/core/camera_processor/lib/*.dylib*
 
 # Distribution / packaging
 .Python
@@ -15,7 +22,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Não excluir lib/ completamente, pois precisamos das bibliotecas nativas
+# lib/
 lib64/
 parts/
 sdist/
@@ -25,6 +33,10 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# scikit-build
+_skbuild/
+_cmake_test_compile/
 
 # PyInstaller
 # Usually these files are written by a python script from a template
@@ -146,4 +158,10 @@ cython_debug/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db
+
+# Pasta de build específica do C
+c_src/build/
+
+# Arquivos temporários de teste
+test_*.py 

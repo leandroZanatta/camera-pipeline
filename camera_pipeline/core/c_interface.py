@@ -44,6 +44,17 @@ def _find_and_load_library():
     """Tenta encontrar e carregar a biblioteca C compartilhada."""
     global C_LIBRARY, IS_INTERFACE_READY
     
+    # Configurar LD_LIBRARY_PATH para encontrar bibliotecas no pacote
+    lib_dir = os.path.join(os.path.dirname(__file__), 'camera_processor', 'lib')
+    if os.path.exists(lib_dir):
+        # Adicionar lib_dir ao LD_LIBRARY_PATH
+        if platform.system() == "Linux":
+            old_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+            os.environ['LD_LIBRARY_PATH'] = f"{lib_dir}:{old_ld_path}"
+        elif platform.system() == "Darwin":  # macOS
+            old_ld_path = os.environ.get('DYLD_LIBRARY_PATH', '')
+            os.environ['DYLD_LIBRARY_PATH'] = f"{lib_dir}:{old_ld_path}"
+    
     lib_names = ['camera_pipeline_c', 'libcamera_pipeline_c']
     system = platform.system()
     
@@ -62,12 +73,10 @@ def _find_and_load_library():
         # Caminhos onde procurar a biblioteca
         search_paths = [
             # Dentro do diretório do módulo
-            os.path.join(os.path.dirname(__file__), lib_filename),
-            # Dentro do subdiretório camera_processor
             os.path.join(os.path.dirname(__file__), 'camera_processor', lib_filename),
             # Caminho relativo para build local (útil durante desenvolvimento)
             os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'build', 'lib', lib_filename)),
-            os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'camera_pipeline_c', 'build', lib_filename)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'c_src', 'build', lib_filename)),
             # Caminhos adicionais de build
             os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '_skbuild', f'linux-{platform.machine()}-{sys.version_info.major}.{sys.version_info.minor}', 'cmake-build', lib_filename)),
             os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '_skbuild', f'linux-{platform.machine()}-{sys.version_info.major}.{sys.version_info.minor}', 'cmake-install', lib_filename)),

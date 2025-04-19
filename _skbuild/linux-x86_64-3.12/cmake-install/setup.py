@@ -67,12 +67,37 @@ class PostInstallCommand:
                 os.chdir(cwd)
         else:
             print(f"Biblioteca já existe em {target_lib}")
+            
+        # Verificar e copiar as bibliotecas do FFmpeg
+        lib_dir = os.path.join(target_dir, "lib")
+        if not os.path.exists(lib_dir) or not os.listdir(lib_dir):
+            print("Copiando bibliotecas do FFmpeg...")
+            os.makedirs(lib_dir, exist_ok=True)
+            
+            # Lista de bibliotecas que precisamos incluir
+            ffmpeg_libs = [
+                "libavformat.so",
+                "libavcodec.so",
+                "libavutil.so",
+                "libswscale.so"
+            ]
+            
+            system_lib_dir = "/usr/lib/x86_64-linux-gnu"
+            
+            for lib in ffmpeg_libs:
+                # Encontrar todas as versões da biblioteca (incluindo links simbólicos)
+                for file in os.listdir(system_lib_dir):
+                    if file.startswith(lib):
+                        src = os.path.join(system_lib_dir, file)
+                        dst = os.path.join(lib_dir, file)
+                        print(f"Copiando {src} para {dst}")
+                        shutil.copy2(src, dst)
 
 
 # Os metadados, dependências e configuração de build são definidos em pyproject.toml
 setup(
     package_data={
-        "camera_pipeline.core.camera_processor": ["*.so"],
+        "camera_pipeline.core.camera_processor": ["*.so", "lib/*.so*"],
     },
     # Especificando explicitamente o diretório do CMakeLists.txt
     cmake_source_dir="c_src",

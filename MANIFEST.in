@@ -13,3 +13,6 @@ prune c_src/build
 # Não incluir o código python explicitamente aqui, 
 # setuptools deve encontrá-lo via 'packages' em pyproject.toml.
 # graft camera_pipeline 
+
+include camera_pipeline/core/camera_processor/*.so
+recursive-include camera_pipeline/core/camera_processor/lib *.so* 

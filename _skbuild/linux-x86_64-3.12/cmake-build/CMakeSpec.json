@@ -1,1 +1,1 @@
-{"args": ["/tmp/pip-build-env-8mqqw1jy/overlay/lib/python3.12/site-packages/cmake/data/bin/cmake", "-DCMAKE_BUILD_TYPE:STRING=Release"], "version": "4.0.0", "environment": {"PYTHONNOUSERSITE": "1", "PYTHONPATH": "/tmp/pip-build-env-8mqqw1jy/site"}}
+{"args": ["/tmp/pip-build-env-jzpebouz/overlay/lib/python3.12/site-packages/cmake/data/bin/cmake", "-DCMAKE_BUILD_TYPE:STRING=Release"], "version": "4.0.0", "environment": {"PYTHONNOUSERSITE": "1", "PYTHONPATH": "/tmp/pip-build-env-jzpebouz/site"}}
