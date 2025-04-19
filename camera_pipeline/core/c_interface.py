@@ -39,10 +39,16 @@ STATUS_MAX_SLOTS = 7
 # Variável global para armazenar a biblioteca carregada
 C_LIBRARY = None
 IS_INTERFACE_READY = False
+# Dicionário para armazenar bibliotecas FFmpeg carregadas
+FFMPEG_LIBRARIES = {}
+
+def _get_lib_dir():
+    """Retorna o diretório onde as bibliotecas estão localizadas"""
+    return os.path.join(os.path.dirname(__file__), 'camera_processor', 'lib')
 
 def _setup_library_paths():
     """Configurar os caminhos para as bibliotecas compartilhadas"""
-    lib_dir = os.path.join(os.path.dirname(__file__), 'camera_processor', 'lib')
+    lib_dir = _get_lib_dir()
     if os.path.exists(lib_dir):
         logger.info(f"Diretório de bibliotecas encontrado: {lib_dir}")
         
@@ -60,28 +66,123 @@ def _setup_library_paths():
         # Em Windows, adicionar à PATH
         elif platform.system() == "Windows":
             os.environ['PATH'] = f"{lib_dir};{os.environ.get('PATH', '')}"
+            
+        # Listar as bibliotecas presentes para debug
+        if os.path.exists(lib_dir):
+            try:
+                files = os.listdir(lib_dir)
+                logger.info(f"Bibliotecas encontradas no diretório: {files}")
+            except Exception as e:
+                logger.warning(f"Não foi possível listar o conteúdo do diretório: {e}")
 
-# Configurar caminhos de bibliotecas
+# Configurar caminhos de bibliotecas antes de qualquer coisa
 _setup_library_paths()
+
+def _load_ffmpeg_libraries():
+    """Carrega as bibliotecas do FFmpeg na ordem correta para resolver dependências"""
+    global FFMPEG_LIBRARIES
+    
+    # Limpar o dicionário de bibliotecas
+    FFMPEG_LIBRARIES.clear()
+    
+    lib_dir = _get_lib_dir()
+    if not os.path.exists(lib_dir):
+        logger.warning(f"Diretório de bibliotecas não encontrado: {lib_dir}")
+        return False
+    
+    # Lista de bibliotecas na ordem correta - do nível mais baixo para o mais alto
+    ffmpeg_libs_order = [
+        # Versões com número de versão específico
+        "libvpl.so.2",
+        "libva.so.2",
+        "libva-drm.so.2",
+        "libswresample.so.4",
+        "libavutil.so.58",
+        "libavcodec.so.60",
+        "libavformat.so.60",
+        "libswscale.so.7",
+        # Links simbólicos sem número de versão
+        "libvpl.so",
+        "libva.so",
+        "libva-drm.so",
+        "libswresample.so",
+        "libavutil.so",
+        "libavcodec.so",
+        "libavformat.so",
+        "libswscale.so"
+    ]
+    
+    # Carregar bibliotecas em ordem
+    successes = []
+    failures = []
+    for lib_name in ffmpeg_libs_order:
+        lib_path = os.path.join(lib_dir, lib_name)
+        if os.path.exists(lib_path):
+            try:
+                # Usar RTLD_GLOBAL para garantir que os símbolos estejam disponíveis para outras bibliotecas
+                fflib = ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                FFMPEG_LIBRARIES[lib_name] = fflib
+                logger.info(f"✓ Biblioteca FFmpeg carregada com sucesso: {lib_name}")
+                successes.append(lib_name)
+            except Exception as e:
+                logger.error(f"✗ Erro ao carregar {lib_name}: {e}")
+                failures.append((lib_name, str(e)))
+    
+    # Verificar dependências se alguma biblioteca falhou ao carregar
+    if failures:
+        for lib_name, error in failures:
+            lib_path = os.path.join(lib_dir, lib_name)
+            try:
+                # Verificar as dependências não resolvidas
+                result = os.popen(f"ldd {lib_path} | grep 'not found'").read()
+                if result:
+                    logger.error(f"Dependências não resolvidas para {lib_name}:\n{result}")
+                else:
+                    logger.error(f"Biblioteca {lib_name} falhou por outro motivo: {error}")
+            except Exception as e:
+                logger.error(f"Não foi possível verificar as dependências de {lib_name}: {e}")
+    
+    if successes:
+        logger.info(f"Carregadas {len(successes)} bibliotecas FFmpeg com sucesso")
+        return True
+    else:
+        logger.warning("Nenhuma biblioteca FFmpeg foi carregada com sucesso")
+        return False
+
+def _pre_load_system_libraries():
+    """Tenta carregar bibliotecas do sistema que podem ser necessárias"""
+    try:
+        # Lista de bibliotecas do sistema que podem ajudar
+        if platform.system() == "Linux":
+            system_libs = [
+                "libstdc++.so.6",
+                "libgcc_s.so.1"
+            ]
+            
+            for lib in system_libs:
+                try:
+                    system_path = ctypes.util.find_library(lib)
+                    if system_path:
+                        ctypes.CDLL(system_path, mode=ctypes.RTLD_GLOBAL)
+                        logger.info(f"Biblioteca do sistema carregada: {lib}")
+                except Exception as e:
+                    logger.warning(f"Não foi possível carregar a biblioteca do sistema {lib}: {e}")
+    except Exception as e:
+        logger.warning(f"Erro ao carregar bibliotecas do sistema: {e}")
 
 def _find_and_load_library():
     """Tenta encontrar e carregar a biblioteca C compartilhada."""
     global C_LIBRARY, IS_INTERFACE_READY
     
-    # Configurar LD_LIBRARY_PATH para encontrar bibliotecas no pacote
-    lib_dir = os.path.join(os.path.dirname(__file__), 'camera_processor', 'lib')
-    if os.path.exists(lib_dir):
-        # Listar todos os arquivos no diretório de bibliotecas para debug
-        logger.debug(f"Arquivos no diretório {lib_dir}: {os.listdir(lib_dir) if os.path.exists(lib_dir) else 'Diretório não existe'}")
-        
-        # Adicionar lib_dir ao LD_LIBRARY_PATH
-        if platform.system() == "Linux":
-            old_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-            os.environ['LD_LIBRARY_PATH'] = f"{lib_dir}:{old_ld_path}"
-        elif platform.system() == "Darwin":  # macOS
-            old_ld_path = os.environ.get('DYLD_LIBRARY_PATH', '')
-            os.environ['DYLD_LIBRARY_PATH'] = f"{lib_dir}:{old_ld_path}"
+    # Primeiro carregar bibliotecas do sistema que podem ser necessárias
+    _pre_load_system_libraries()
     
+    # Carregar bibliotecas FFmpeg na ordem correta
+    ffmpeg_loaded = _load_ffmpeg_libraries()
+    if not ffmpeg_loaded:
+        logger.warning("Falha ao carregar bibliotecas FFmpeg. Algumas funcionalidades podem não estar disponíveis.")
+    
+    # Tentar encontrar a biblioteca principal
     lib_names = ['camera_pipeline_c', 'libcamera_pipeline_c']
     system = platform.system()
     
@@ -119,30 +220,24 @@ def _find_and_load_library():
             
     logger.debug(f"Procurando por biblioteca em: {all_search_paths}")
     
-    # Tenta carregar as bibliotecas do ffmpeg diretamente para preloader
-    try:
-        ffmpeg_libs = ['libavformat.so.60', 'libavcodec.so.60', 'libavutil.so.58', 'libswscale.so.7']
-        for fflib in ffmpeg_libs:
-            fflib_path = os.path.join(lib_dir, fflib)
-            if os.path.exists(fflib_path):
-                try:
-                    logger.debug(f"Pre-carregando biblioteca FFmpeg: {fflib_path}")
-                    ctypes.CDLL(fflib_path)
-                except Exception as e:
-                    logger.warning(f"Erro ao pre-carregar {fflib_path}: {e}")
-    except Exception as e:
-        logger.warning(f"Erro ao tentar pre-carregar bibliotecas FFmpeg: {e}")
-    
     # Tentar carregar a partir dos caminhos
     for path in all_search_paths:
         if os.path.exists(path):
             try:
-                C_LIBRARY = ctypes.CDLL(path)
+                # Usar RTLD_GLOBAL para garantir que os símbolos estejam disponíveis para outras bibliotecas
+                C_LIBRARY = ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
                 logger.info(f"Biblioteca C carregada com sucesso de: {path}")
                 IS_INTERFACE_READY = True
                 return True
             except OSError as e:
                 logger.warning(f"Falha ao carregar biblioteca de {path}: {e}")
+                # Verificar dependências não resolvidas
+                try:
+                    result = os.popen(f"ldd {path} | grep 'not found'").read()
+                    if result:
+                        logger.error(f"Dependências não resolvidas para biblioteca principal:\n{result}")
+                except Exception:
+                    pass
         else:
             logger.debug(f"Biblioteca não encontrada em: {path}")
 

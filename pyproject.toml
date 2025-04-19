@@ -1,62 +1,55 @@
 [build-system]
 requires = [
-    "setuptools>=78.1.0",
-    "wheel>=0.44.0",
-    "scikit-build>=0.18.1",
-    "packaging>=24.2",
-    "distro>=1.9.0",
-    "cmake>=3.10.0",
-    "ninja",
+    "setuptools>=42",
+    "wheel",
+    "scikit-build",
+    "cmake",
+    "ninja"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "camera-pipeline-processor"
 version = "0.1.0"
-description = "Processador de Pipeline de Câmera com C/C++ e Python"
-readme = "README.md"
+description = "A camera pipeline processor for video processing."
 authors = [
-    {name = "Leandro Zanatta", email = "leandrozanatta27@gmail.com"},
+    { name="Leandro Zanatta", email="leandro@example.com" }
 ]
-requires-python = ">=3.10"
-license = "MIT"
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: C",
-]
-dependencies = [
-    "opencv-python==4.11.0.86",
-    "numpy>=1.26.4",
-]
-
-[project.optional-dependencies]
-dev = ["pytest", "black", "flake8"]
-test = ["pytest"]
-
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.8"
 
 [project.urls]
-Homepage = "https://github.com/leandroZanatta/camera-pipeline"
-Repository = "https://github.com/leandroZanatta/camera-pipeline.git"
+"Homepage" = "https://github.com/leandroZanatta/camera-pipeline"
 
-[tool.setuptools]
-packages = [
-    "camera_pipeline", 
-    "camera_pipeline.core", 
-    "camera_pipeline.core.camera_processor"
-]
-include-package-data = true
+[project.dependencies]
+"opencv-python" = "==4.11.0.86"
 
-[tool.setuptools.package-data]
-"camera_pipeline.core.camera_processor" = ["*.so", "lib/*.so*"]
+[project.optional-dependencies]
+numpy = ["numpy>=1.26.4"]
+ui = ["PySide6>=6.5.0"]
+dev = ["pytest>=7.4.2", "black>=23.9.1"]
+full = ["numpy>=1.26.4", "PySide6>=6.5.0", "pytest>=7.4.2", "black>=23.9.1"]
 
-[tool.scikit-build]
-cmake.source-dir = "c_src"
-cmake.install-dir = "camera_pipeline/core/camera_processor"
-cmake.build-type = "Release"
-cmake.verbose = true
-wheel.expand-macos-universal-tags = true 
+[tool.setuptools.packages.find]
+where = ["camera_pipeline"]
+
+[tool.cmake]
+minimum-version = "3.10"
+
+[tool.cmake.build]
+config = "Release"
+
+[tool.cmake.install]
+prefix = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib"
+
+[tool.cmake.find]
+find_package = "FFmpeg"
+
+[tool.cmake.options]
+FFMPEG_INCLUDE_DIR = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib"
+FFMPEG_LIBRARY_DIR = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib"
+
+[tool.cmake.build-options]
+CMAKE_BUILD_TYPE = "Release"
+CMAKE_INSTALL_PREFIX = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib" 

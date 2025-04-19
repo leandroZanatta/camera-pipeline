@@ -1,7 +1,0 @@
-numpy>=1.26.4
-opencv-python==4.11.0.86
-scikit-build==0.18.1
-setuptools==78.1.0
-wheel==0.44.0
-packaging==24.2
-distro>=1.9.0 
