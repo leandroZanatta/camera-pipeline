@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import glob
 from skbuild import setup
 
 
@@ -94,11 +95,22 @@ class PostInstallCommand:
                         shutil.copy2(src, dst)
 
 
+# Encontrar todas as bibliotecas .so no diretório lib
+lib_files = []
+lib_dir = os.path.join("camera_pipeline", "core", "camera_processor", "lib")
+if os.path.exists(lib_dir):
+    lib_files = glob.glob(os.path.join(lib_dir, "*.so*"))
+    print(f"Encontradas {len(lib_files)} bibliotecas para incluir: {lib_files}")
+
 # Os metadados, dependências e configuração de build são definidos em pyproject.toml
 setup(
     package_data={
         "camera_pipeline.core.camera_processor": ["*.so", "lib/*.so*"],
     },
+    data_files=[
+        ("camera_pipeline/core/camera_processor/lib", lib_files),
+    ],
+    include_package_data=True,
     # Especificando explicitamente o diretório do CMakeLists.txt
     cmake_source_dir="c_src",
     cmake_install_dir="camera_pipeline/core/camera_processor",

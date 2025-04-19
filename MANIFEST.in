@@ -15,4 +15,5 @@ prune c_src/build
 # graft camera_pipeline 
 
 include camera_pipeline/core/camera_processor/*.so
+graft camera_pipeline/core/camera_processor/lib
 recursive-include camera_pipeline/core/camera_processor/lib *.so* 

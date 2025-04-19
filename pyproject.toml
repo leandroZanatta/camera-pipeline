@@ -52,7 +52,7 @@ packages = [
 include-package-data = true
 
 [tool.setuptools.package-data]
-"camera_pipeline.core.camera_processor" = ["*.so"]
+"camera_pipeline.core.camera_processor" = ["*.so", "lib/*.so*"]
 
 [tool.scikit-build]
 cmake.source-dir = "c_src"

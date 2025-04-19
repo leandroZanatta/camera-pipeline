@@ -44,7 +44,7 @@ rule CUSTOM_COMMAND
 # Rule for re-running cmake.
 
 rule RERUN_CMAKE
-  command = /tmp/pip-build-env-jzpebouz/overlay/lib/python3.12/site-packages/cmake/data/bin/cmake --regenerate-during-build -S/home/leandro/Documentos/leandro/camera-pipeline/c_src -B/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build
+  command = /tmp/pip-build-env-2jcqg8ac/overlay/lib/python3.12/site-packages/cmake/data/bin/cmake --regenerate-during-build -S/home/leandro/Documentos/leandro/camera-pipeline/c_src -B/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build
   description = Re-running CMake...
   generator = 1
 

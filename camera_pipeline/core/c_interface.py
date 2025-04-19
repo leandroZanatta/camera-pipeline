@@ -40,6 +40,30 @@ STATUS_MAX_SLOTS = 7
 C_LIBRARY = None
 IS_INTERFACE_READY = False
 
+def _setup_library_paths():
+    """Configurar os caminhos para as bibliotecas compartilhadas"""
+    lib_dir = os.path.join(os.path.dirname(__file__), 'camera_processor', 'lib')
+    if os.path.exists(lib_dir):
+        logger.info(f"Diretório de bibliotecas encontrado: {lib_dir}")
+        
+        # Em Linux, configurar LD_LIBRARY_PATH
+        if platform.system() == "Linux":
+            old_path = os.environ.get('LD_LIBRARY_PATH', '')
+            os.environ['LD_LIBRARY_PATH'] = f"{lib_dir}:{old_path}"
+            logger.info(f"LD_LIBRARY_PATH configurado: {os.environ.get('LD_LIBRARY_PATH')}")
+            
+        # Em macOS, configurar DYLD_LIBRARY_PATH
+        elif platform.system() == "Darwin":
+            old_path = os.environ.get('DYLD_LIBRARY_PATH', '')
+            os.environ['DYLD_LIBRARY_PATH'] = f"{lib_dir}:{old_path}"
+            
+        # Em Windows, adicionar à PATH
+        elif platform.system() == "Windows":
+            os.environ['PATH'] = f"{lib_dir};{os.environ.get('PATH', '')}"
+
+# Configurar caminhos de bibliotecas
+_setup_library_paths()
+
 def _find_and_load_library():
     """Tenta encontrar e carregar a biblioteca C compartilhada."""
     global C_LIBRARY, IS_INTERFACE_READY
@@ -47,6 +71,9 @@ def _find_and_load_library():
     # Configurar LD_LIBRARY_PATH para encontrar bibliotecas no pacote
     lib_dir = os.path.join(os.path.dirname(__file__), 'camera_processor', 'lib')
     if os.path.exists(lib_dir):
+        # Listar todos os arquivos no diretório de bibliotecas para debug
+        logger.debug(f"Arquivos no diretório {lib_dir}: {os.listdir(lib_dir) if os.path.exists(lib_dir) else 'Diretório não existe'}")
+        
         # Adicionar lib_dir ao LD_LIBRARY_PATH
         if platform.system() == "Linux":
             old_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
@@ -91,6 +118,20 @@ def _find_and_load_library():
             all_search_paths.append(system_path)
             
     logger.debug(f"Procurando por biblioteca em: {all_search_paths}")
+    
+    # Tenta carregar as bibliotecas do ffmpeg diretamente para preloader
+    try:
+        ffmpeg_libs = ['libavformat.so.60', 'libavcodec.so.60', 'libavutil.so.58', 'libswscale.so.7']
+        for fflib in ffmpeg_libs:
+            fflib_path = os.path.join(lib_dir, fflib)
+            if os.path.exists(fflib_path):
+                try:
+                    logger.debug(f"Pre-carregando biblioteca FFmpeg: {fflib_path}")
+                    ctypes.CDLL(fflib_path)
+                except Exception as e:
+                    logger.warning(f"Erro ao pre-carregar {fflib_path}: {e}")
+    except Exception as e:
+        logger.warning(f"Erro ao tentar pre-carregar bibliotecas FFmpeg: {e}")
     
     # Tentar carregar a partir dos caminhos
     for path in all_search_paths:
