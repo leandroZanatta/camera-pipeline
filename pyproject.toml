@@ -26,9 +26,6 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/leandroZanatta/camera-pipeline"
 
-[project.dependencies]
-"opencv-python" = "==4.11.0.86"
-
 [project.optional-dependencies]
 numpy = ["numpy>=1.26.4"]
 ui = ["PySide6>=6.5.0"]
