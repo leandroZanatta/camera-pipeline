@@ -1,0 +1,7 @@
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/camera_pipeline_c.dir
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/edit_cache.dir
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/rebuild_cache.dir
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/list_install_components.dir
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/install.dir
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/install/local.dir
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-build/CMakeFiles/install/strip.dir

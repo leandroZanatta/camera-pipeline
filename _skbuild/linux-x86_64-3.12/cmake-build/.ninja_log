@@ -1,0 +1,7 @@
+# ninja log v5
+2	95	1745087722568927329	CMakeFiles/camera_pipeline_c.dir/src/logger.c.o	dfb50448ff4461df
+1	97	1745087722571926701	CMakeFiles/camera_pipeline_c.dir/src/camera_processor.c.o	a1b1f2106d53f1ed
+2	154	1745087722627914979	CMakeFiles/camera_pipeline_c.dir/src/callback_utils.c.o	797746c12260d427
+3	217	1745087722690901791	CMakeFiles/camera_pipeline_c.dir/src/camera_thread.c.o	3cf87b075a04339
+217	240	1745087722713896977	camera_pipeline_c.so	86a388ecaffe95e
+240	248	0	CMakeFiles/install.util	4732519d3a1e575

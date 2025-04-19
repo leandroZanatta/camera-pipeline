@@ -1,5 +1,15 @@
-include LICENSE
-include README.md
-include requirements.txt
-recursive-include camera_pipeline *.py *.so *.dll
-global-exclude *.py[cod] __pycache__ *.so *.dll *.dylib *.c *.h *.o *.a *.obj *.cmake *.make *.ts CMake* Makefile 
+# Incluir recursivamente o diretório c_src - ESSENCIAL PARA SDIST
+graft c_src
+
+# Incluir arquivos de configuração/metadados necessários para o build
+include pyproject.toml
+include setup.py
+include README.md # Opcional no sdist, mas comum
+include LICENSE   # Opcional no sdist, mas comum
+
+# Excluir diretório de build C da sdist
+prune c_src/build
+
+# Não incluir o código python explicitamente aqui, 
+# setuptools deve encontrá-lo via 'packages' em pyproject.toml.
+# graft camera_pipeline 

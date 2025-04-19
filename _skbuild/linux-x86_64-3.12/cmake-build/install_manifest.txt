@@ -1,0 +1,1 @@
+/home/leandro/Documentos/leandro/camera-pipeline/_skbuild/linux-x86_64-3.12/cmake-install/camera_pipeline/core/camera_processor/./camera_pipeline_c.so
