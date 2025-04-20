@@ -48,4 +48,4 @@ wheel.install-dir = ""
 # wheel.packages = ["camera_pipeline"]
 
 # Controla se binários na wheel são "stripped" (removidos símbolos de debug)
-wheel.strip = False 
+#wheel.strip = False 
