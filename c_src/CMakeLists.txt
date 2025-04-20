@@ -12,12 +12,16 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g" CACHE STRING "C flags for De
 # Encontrar pthreads (necessário para Linux/macOS)
 find_package(Threads REQUIRED)
 
-# --- Adicionar FFmpeg --- 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(AVFORMAT REQUIRED libavformat)
-pkg_check_modules(AVCODEC REQUIRED libavcodec)
-pkg_check_modules(AVUTIL REQUIRED libavutil)
-pkg_check_modules(SWSCALE REQUIRED libswscale)
+# --- Adicionar FFmpeg (Esperado do ambiente Conda agora) --- 
+# Remover pkg-config e usar find_package diretamente
+# find_package(PkgConfig REQUIRED) 
+# pkg_check_modules(AVFORMAT REQUIRED libavformat)
+# pkg_check_modules(AVCODEC REQUIRED libavcodec)
+# pkg_check_modules(AVUTIL REQUIRED libavutil)
+# pkg_check_modules(SWSCALE REQUIRED libswscale)
+
+# Encontrar FFmpeg (deve encontrar a versão do Conda)
+find_package(FFmpeg REQUIRED COMPONENTS avformat avcodec avutil swscale)
 
 # Definir os arquivos fonte
 set(SOURCE_FILES
@@ -33,10 +37,7 @@ add_library(camera_pipeline_c SHARED ${SOURCE_FILES})
 # Adicionar diretório de includes
 target_include_directories(camera_pipeline_c PRIVATE 
     include # Nosso diretório de includes
-    ${AVFORMAT_INCLUDE_DIRS}
-    ${AVCODEC_INCLUDE_DIRS}
-    ${AVUTIL_INCLUDE_DIRS}
-    ${SWSCALE_INCLUDE_DIRS}
+    ${FFMPEG_INCLUDE_DIRS} # Usar variável definida por find_package(FFmpeg)
 )
 
 # No Linux precisamos garantir que a biblioteca tenha o nome sem o prefixo "lib"
@@ -47,28 +48,30 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
-# Para Linux e macOS, configurar RPATH para que a biblioteca encontre as dependências vendidas
-if(UNIX)
-    if(APPLE)
-        set(ORIGIN "@loader_path")
-    else()
-        set(ORIGIN "$ORIGIN")
-    endif()
-    
-    # Configurar RPATH para procurar nas pastas "lib" e "." relativas ao local da biblioteca
-    set_target_properties(camera_pipeline_c PROPERTIES
-        INSTALL_RPATH "${ORIGIN}/lib;${ORIGIN}"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
+# Para Linux e macOS, configurar RPATH para que a biblioteca encontre as dependências
+# **Importante:** Agora deve apontar para as libs do Conda se necessário,
+# mas find_package geralmente configura isso melhor. Remover RPATH explícito por enquanto.
+# if(UNIX)
+#     if(APPLE)
+#         set(ORIGIN "@loader_path")
+#     else()
+#         set(ORIGIN "$ORIGIN")
+#     endif()
+#     
+#     set_target_properties(camera_pipeline_c PROPERTIES
+#         INSTALL_RPATH "${ORIGIN}/lib;${ORIGIN}"
+#         BUILD_WITH_INSTALL_RPATH TRUE
+#     )
+# endif()
 
 # Lincar dependências (FFmpeg e Pthreads)
 target_link_libraries(camera_pipeline_c PRIVATE 
     Threads::Threads
-    ${AVFORMAT_LIBRARIES}
-    ${AVCODEC_LIBRARIES}
-    ${AVUTIL_LIBRARIES}
-    ${SWSCALE_LIBRARIES}
+    # Usar targets importados fornecidos por find_package(FFmpeg)
+    FFmpeg::avformat
+    FFmpeg::avcodec
+    FFmpeg::avutil
+    FFmpeg::swscale
 )
 
 # Instalar a biblioteca no subdiretório correto relativo à raiz da instalação CMake

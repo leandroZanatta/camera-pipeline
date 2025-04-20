@@ -69,9 +69,8 @@ def _load_c_library():
     try:
         if os.path.exists(expected_path):
             # Carregar a biblioteca. O dynamic linker do SO cuidará das dependências (FFmpeg).
-            # Usar RTLD_GLOBAL pode ajudar se outras extensões precisarem dos símbolos,
-            # mas pode não ser estritamente necessário.
-            C_LIBRARY = ctypes.CDLL(expected_path, mode=ctypes.RTLD_GLOBAL)
+            # Remover RTLD_GLOBAL para teste
+            C_LIBRARY = ctypes.CDLL(expected_path)
             logger.info(f"Biblioteca C carregada com sucesso de: {expected_path}")
             IS_INTERFACE_READY = True
             return True
