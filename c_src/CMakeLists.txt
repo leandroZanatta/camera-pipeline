@@ -71,9 +71,9 @@ target_link_libraries(camera_pipeline_c PRIVATE
     ${SWSCALE_LIBRARIES}
 )
 
-# Instalar a biblioteca onde scikit-build espera encontrá-la
-# baseado na declaração Extension("camera_pipeline.core.camera_pipeline_c", ...)
+# Instalar a biblioteca na raiz do diretório de instalação do CMake
+# scikit-build-core mapeará isso para camera_pipeline/core na wheel
 install(TARGETS camera_pipeline_c
-        LIBRARY DESTINATION camera_pipeline/core # Relativo ao prefixo de instalação CMake
-        ARCHIVE DESTINATION camera_pipeline/core # Relativo ao prefixo de instalação CMake
+        LIBRARY DESTINATION . 
+        ARCHIVE DESTINATION .
        )
