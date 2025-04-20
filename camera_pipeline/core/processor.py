@@ -334,6 +334,7 @@ class CameraProcessor:
 
     def register_camera(
         self,
+        camera_id: int,  # ID fornecido pelo Python
         url: str,
         frame_callback: Union[FrameCallback, LegacyFrameCallbackFunc],
         status_callback: Optional[
@@ -342,25 +343,23 @@ class CameraProcessor:
         target_fps: int = 1,
     ) -> int:
         """
-        Registra uma nova câmera com callbacks obrigatórios para frames e opcionais para status.
+        Registra uma nova câmera usando um ID fornecido externamente.
 
         Args:
+            camera_id: O ID a ser usado para esta câmera (definido pelo chamador).
             url: URL da câmera (RTMP, HLS, RTSP, etc.)
-            frame_callback: Interface FrameCallback ou função de callback para frames (OBRIGATÓRIO).
-                           Se for uma função, deve aceitar (camera_id, frame).
-            status_callback: Interface StatusCallback ou função de callback para status (OPCIONAL).
-                            Se for uma função, deve aceitar (camera_id, status_code, message).
+            frame_callback: Interface FrameCallback ou função para frames (OBRIGATÓRIO).
+            status_callback: Interface StatusCallback ou função para status (OPCIONAL).
             target_fps: Taxa de quadros alvo (0 para máxima)
 
         Retorna:
-            O camera_id (>= 0) em sucesso, ou um código de erro C (< 0).
+            0 em sucesso, ou um código de erro C (< 0).
         """
-        # Validar que frame_callback foi fornecido (obrigatório)
+        # Validar que frame_callback foi fornecido
         if frame_callback is None:
             logger.error("Callback de frame é obrigatório")
-            return -3  # Código de erro: parâmetros inválidos
+            return -3
 
-        # Converter função para interface se necessário
         adapted_frame_callback = self._adapt_frame_callback(frame_callback)
         if adapted_frame_callback is None:
             logger.error(
@@ -368,7 +367,6 @@ class CameraProcessor:
             )
             return -3
 
-        # Converter função para interface se necessário para status
         adapted_status_callback = self._adapt_status_callback(status_callback)
         if status_callback is not None and adapted_status_callback is None:
             logger.error(
@@ -381,21 +379,27 @@ class CameraProcessor:
                 logger.error(
                     "Processador C não inicializado. Chame initialize_c_library() primeiro."
                 )
-                return -1  # Código de erro: não inicializado
+                return -1
 
             if not url:
                 logger.error("URL inválida fornecida para register_camera.")
-                return -3  # Código de erro: URL inválida
+                return -3
+            
+            # Verificar se o ID já está em uso
+            if camera_id in self._active_cameras:
+                logger.error(f"Tentativa de registrar câmera com ID {camera_id} que já está ativo.")
+                return -4 # Código de erro para ID duplicado
 
             effective_target_fps = int(target_fps) if target_fps > 0 else 0
             logger.info(
-                f"Solicitando adição da câmera: URL='{url}', TargetFPS={effective_target_fps}"
+                f"Solicitando adição da câmera: ID={camera_id}, URL='{url}', TargetFPS={effective_target_fps}"
             )
 
             try:
                 c_url = url.encode("utf-8")
-                # Usar as referências dos callbacks mantidas em self
-                camera_id = self.c_lib.processor_add_camera(
+                # Chamar a função C passando o camera_id
+                ret = self.c_lib.processor_add_camera(
+                    ctypes.c_int(camera_id), # Passa o ID fornecido
                     c_url,
                     self._c_status_callback_ref,
                     self._c_frame_callback_ref,
@@ -404,33 +408,32 @@ class CameraProcessor:
                     ctypes.c_int(effective_target_fps),
                 )
 
-                if camera_id >= 0:
+                if ret == 0:
                     logger.info(
-                        f"Câmera adicionada via C com sucesso. ID: {camera_id}, URL: {url}"
+                        f"Câmera ID {camera_id} adicionada via C com sucesso. URL: {url}"
                     )
-                    # Armazenar informações básicas da câmera ativa
+                    # Armazenar informações usando o ID fornecido
                     self._active_cameras[camera_id] = {
                         "url": url,
                         "target_fps": effective_target_fps,
-                        "status": STATUS_CONNECTING,  # Estado inicial inferido
+                        "status": STATUS_CONNECTING,
                     }
-                    # Registrar os callbacks
                     self._frame_callbacks[camera_id] = adapted_frame_callback
                     if adapted_status_callback is not None:
                         self._status_callbacks[camera_id] = adapted_status_callback
-                    return camera_id
+                    return 0 # Retorna 0 para sucesso
                 else:
-                    # Códigos de erro C: -1 (não inicializado), -2 (sem slots), -3 (URL inválida), -5 (erro thread)
+                    # Erros C: -1 (init), -3 (url), -4(id), -5 (thread), outros...
                     logger.error(
-                        f"Falha ao adicionar câmera via C (Erro {camera_id}). URL: {url}"
+                        f"Falha ao adicionar câmera ID {camera_id} via C (Erro {ret}). URL: {url}"
                     )
-                    return camera_id  # Retorna o código de erro C
+                    return ret  # Retorna o código de erro C
 
             except Exception as e:
                 logger.exception(
-                    f"Exceção Python ao chamar processor_add_camera para URL {url}: {e}"
+                    f"Exceção Python ao chamar processor_add_camera para ID {camera_id}, URL {url}: {e}"
                 )
-                return -99  # Código de erro genérico para exceção Python
+                return -99
 
     def stop_camera(self, camera_id: int) -> bool:
         """
@@ -457,8 +460,10 @@ class CameraProcessor:
                 )
                 # O estado será atualizado pelo callback de status
 
-                # Remover os callbacks registrados
+                # Remover os callbacks registrados E a entrada da câmera ativa
                 with self._state_lock:
+                    if camera_id in self._active_cameras: # Verifica se realmente existe antes de tentar deletar
+                        del self._active_cameras[camera_id]
                     if camera_id in self._frame_callbacks:
                         del self._frame_callbacks[camera_id]
                     if camera_id in self._status_callbacks:

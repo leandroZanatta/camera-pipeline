@@ -142,8 +142,9 @@ def _define_c_functions():
         C_LIBRARY.processor_initialize.argtypes = []
         C_LIBRARY.processor_initialize.restype = ctypes.c_int
         
-        # int processor_add_camera(const char* url, status_callback_t status_cb, frame_callback_t frame_cb, void* status_user_data, void* frame_user_data, int target_fps);
+        # int processor_add_camera(int camera_id, const char* url, status_callback_t status_cb, frame_callback_t frame_cb, void* status_user_data, void* frame_user_data, int target_fps);
         C_LIBRARY.processor_add_camera.argtypes = [
+            ctypes.c_int,               # camera_id (NOVO PRIMEIRO ARGUMENTO)
             ctypes.c_char_p,            # url
             STATUS_CALLBACK_FUNC_TYPE,  # status_cb
             FRAME_CALLBACK_FUNC_TYPE,   # frame_cb
@@ -151,7 +152,7 @@ def _define_c_functions():
             ctypes.py_object,           # frame_user_data
             ctypes.c_int                # target_fps
         ]
-        C_LIBRARY.processor_add_camera.restype = ctypes.c_int
+        C_LIBRARY.processor_add_camera.restype = ctypes.c_int # Deve retornar 0 em sucesso, < 0 em erro
         
         # int processor_stop_camera(int camera_id);
         C_LIBRARY.processor_stop_camera.argtypes = [ctypes.c_int]

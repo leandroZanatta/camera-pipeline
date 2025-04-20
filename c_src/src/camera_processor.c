@@ -81,44 +81,6 @@ void send_frame_to_python(void* camera_context) {
     }
 }
 
-
-// Encontra um slot livre no array e o inicializa
-// Deve ser chamado com contexts_mutex BLOQUEADO
-static int find_and_init_context_slot(const char* url, 
-                                        status_callback_t status_cb, 
-                                        frame_callback_t frame_cb, 
-                                        void* status_cb_user_data, 
-                                        void* frame_cb_user_data,
-                                        int target_fps)
-{
-    for (int i = 0; i < MAX_CAMERAS; ++i) {
-        if (!camera_contexts[i].active) {
-            log_message(LOG_LEVEL_DEBUG, "[Context Mgr] Encontrado slot livre: %d", i);
-            memset(&camera_contexts[i], 0, sizeof(camera_thread_context_t));
-            camera_contexts[i].camera_id = i;
-            camera_contexts[i].active = true;
-            camera_contexts[i].stop_requested = false;
-            camera_contexts[i].state = CAM_STATE_CONNECTING; // Estado inicial
-            strncpy(camera_contexts[i].url, url, MAX_URL_LENGTH - 1);
-            camera_contexts[i].url[MAX_URL_LENGTH - 1] = '\0';
-            camera_contexts[i].status_cb = status_cb;
-            camera_contexts[i].frame_cb = frame_cb;
-            camera_contexts[i].status_cb_user_data = status_cb_user_data;
-            camera_contexts[i].frame_cb_user_data = frame_cb_user_data;
-            // Ajustar target_fps
-            camera_contexts[i].target_fps = (target_fps <= 0) ? 1 : target_fps;
-            // target_interval_ns será calculado na thread
-            camera_contexts[i].video_stream_index = -1;
-            camera_contexts[i].reconnect_attempts = 0;
-            camera_contexts[i].frame_skip_count = 1; // Default inicial
-            // g_active_thread_count++; // Incrementar quando a thread realmente iniciar?
-            return i; 
-        }
-    }
-    log_message(LOG_LEVEL_ERROR, "[Context Mgr] Nenhum slot de câmera livre disponível (MAX_CAMERAS=%d)", MAX_CAMERAS);
-    return -1; 
-}
-
 // Marca um slot como inativo 
 // Deve ser chamado com contexts_mutex BLOQUEADO
 static void mark_context_inactive(int camera_id) {
@@ -128,7 +90,7 @@ static void mark_context_inactive(int camera_id) {
          log_message(LOG_LEVEL_DEBUG, "[Context Mgr] Slot %d marcado como inativo.", camera_id);
          // Signal não necessário aqui se usarmos join loop
                           } else {
-         log_message(LOG_LEVEL_WARNING, "[Context Mgr] Tentativa de marcar slot inválido (%d) como inativo.", camera_id);
+         log_message(LOG_LEVEL_WARNING, "[Context Mgr] Tentativa de marcar slot inválido (%d) ou já inativo como inativo.", camera_id);
      }
 }
 
@@ -173,10 +135,11 @@ int processor_initialize(void)
     return 0;
 }
 
-int processor_add_camera(const char* url, 
-                         status_callback_t status_cb, 
-                         frame_callback_t frame_cb, 
-                         void* status_cb_user_data, 
+int processor_add_camera(int camera_id,
+                         const char* url,
+                         status_callback_t status_cb,
+                         frame_callback_t frame_cb,
+                         void* status_cb_user_data,
                          void* frame_cb_user_data,
                          int target_fps)
 {
@@ -184,25 +147,50 @@ int processor_add_camera(const char* url,
     if (!g_processor_initialized) {
         log_message(LOG_LEVEL_ERROR, "[Processor API] Processador não inicializado ao adicionar câmera.");
         pthread_mutex_unlock(&contexts_mutex);
-        return -1;
+        return -1; // Erro: Não inicializado
     }
 
-    // Validar URL (básico)
+    // 1. Validar URL
     if (!url || strlen(url) == 0) {
         log_message(LOG_LEVEL_ERROR, "[Processor API] URL inválida fornecida para add_camera.");
         pthread_mutex_unlock(&contexts_mutex);
-        return -3;
+        return -3; // Erro: URL inválida
     }
 
-    // Encontrar slot e inicializar contexto
-    int camera_id = find_and_init_context_slot(url, status_cb, frame_cb, status_cb_user_data, frame_cb_user_data, target_fps);
-
-    if (camera_id < 0) { // Erro (sem slots livres)
+    // 2. Validar camera_id
+    if (camera_id < 0 || camera_id >= MAX_CAMERAS) {
+        log_message(LOG_LEVEL_ERROR, "[Processor API] ID de câmera inválido fornecido: %d (MAX: %d)", camera_id, MAX_CAMERAS - 1);
         pthread_mutex_unlock(&contexts_mutex);
-        return -2; // Código de erro para "sem slots"
+        return -4; // Erro: ID inválido
     }
 
-    // Criar a thread para este contexto específico
+    // 3. Verificar se o slot já está ativo
+    if (camera_contexts[camera_id].active) {
+        log_message(LOG_LEVEL_ERROR, "[Processor API] Tentativa de adicionar câmera com ID %d que já está ativo.", camera_id);
+        pthread_mutex_unlock(&contexts_mutex);
+        return -4; // Erro: ID já em uso (ou reusar -4)
+    }
+
+    // 4. Inicializar o contexto no slot especificado
+    log_message(LOG_LEVEL_DEBUG, "[Context Mgr] Usando slot fornecido: %d", camera_id);
+    memset(&camera_contexts[camera_id], 0, sizeof(camera_thread_context_t));
+    camera_contexts[camera_id].camera_id = camera_id; // Armazena o ID fornecido
+    camera_contexts[camera_id].active = true;
+    camera_contexts[camera_id].stop_requested = false;
+    camera_contexts[camera_id].state = CAM_STATE_CONNECTING;
+    strncpy(camera_contexts[camera_id].url, url, MAX_URL_LENGTH - 1);
+    camera_contexts[camera_id].url[MAX_URL_LENGTH - 1] = '\0';
+    camera_contexts[camera_id].status_cb = status_cb;
+    camera_contexts[camera_id].frame_cb = frame_cb;
+    camera_contexts[camera_id].status_cb_user_data = status_cb_user_data;
+    camera_contexts[camera_id].frame_cb_user_data = frame_cb_user_data;
+    camera_contexts[camera_id].target_fps = (target_fps <= 0) ? 1 : target_fps; // Ajustar target_fps
+    camera_contexts[camera_id].video_stream_index = -1;
+    camera_contexts[camera_id].reconnect_attempts = 0;
+    camera_contexts[camera_id].frame_skip_count = 1; // Default inicial
+    // Inicializar outros campos se necessário (pts, etc.)
+
+    // 5. Criar a thread para este contexto específico
     log_message(LOG_LEVEL_INFO, "[Processor API] Criando thread para câmera ID %d (URL: %s)", camera_id, url);
     int rc = pthread_create(&camera_contexts[camera_id].thread_id, NULL, run_camera_loop, &camera_contexts[camera_id]);
     
@@ -211,12 +199,12 @@ int processor_add_camera(const char* url,
         // Marcar como inativo se a thread não pôde ser criada
         mark_context_inactive(camera_id); 
         pthread_mutex_unlock(&contexts_mutex);
-        return -5; // Código de erro para falha na criação da thread
+        return -5; // Erro: Falha na criação da thread
     }
 
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Thread para câmera ID %d criada com sucesso.", camera_id);
     pthread_mutex_unlock(&contexts_mutex);
-    return camera_id; // Retorna o ID da câmera em sucesso
+    return 0; // Retorna 0 em sucesso
 }
 
 int processor_stop_camera(int camera_id) {
@@ -281,7 +269,7 @@ int processor_shutdown(void) {
         if (rc) {
             log_message(LOG_LEVEL_ERROR, "[Processor API] Erro (%d: %s) ao aguardar join da thread para câmera ID %d.", rc, strerror(rc), ids_to_join[i]);
             // Continuar tentando fazer join das outras
-    } else {
+        } else {
             log_message(LOG_LEVEL_DEBUG, "[Processor API] Join da thread para câmera ID %d concluído.", ids_to_join[i]);
             // Marcar como inativo APÓS o join bem-sucedido
             pthread_mutex_lock(&contexts_mutex);
