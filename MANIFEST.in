@@ -10,4 +10,8 @@ recursive-include c_src *
 
 # Incluir a biblioteca compilada no local onde o CMake a instala
 # (Ajuste o caminho/extensão conforme necessário para diferentes OS)
-graft camera_pipeline/core/camera_processor/lib 
+# (Comentado pois scikit-build deve lidar com o .so agora)
+# graft camera_pipeline/core/camera_processor/lib
+
+# (Comentado pois scikit-build deve lidar com o .so agora)
+# graft camera_pipeline/core/camera_processor/lib 

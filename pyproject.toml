@@ -40,9 +40,6 @@ minimum-version = "3.10"
 [tool.cmake.build]
 config = "Release"
 
-[tool.cmake.install]
-prefix = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib"
-
 [tool.cmake.find]
 find_package = "FFmpeg"
 
