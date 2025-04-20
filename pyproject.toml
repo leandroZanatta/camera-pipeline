@@ -3,8 +3,6 @@ requires = [
     "setuptools>=42",
     "wheel",
     "scikit-build-core>=0.8",
-    "cmake>=3.15",
-    "ninja"
 ]
 build-backend = "scikit_build_core.build"
 
@@ -33,10 +31,11 @@ dev = ["pytest>=7.4.2", "black>=23.9.1"]
 full = ["numpy>=1.26.4", "PySide6>=6.5.0", "pytest>=7.4.2", "black>=23.9.1"]
 
 [tool.scikit-build]
+# Definir explicitamente a versão mínima do CMake
+cmake.minimum-required = "3.15"
 # Configurações específicas do CMake
 cmake.source-dir = "c_src"
 cmake.build-type = "Release"
-# Opcional: cmake.minimum-version = "3.15"
 
 # Configurações da Wheel
 # Mapeia o diretório de instalação do CMake para a raiz da wheel.
