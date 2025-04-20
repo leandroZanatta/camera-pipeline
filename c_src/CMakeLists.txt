@@ -50,20 +50,15 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # Para Linux e macOS, configurar RPATH para que a biblioteca encontre as dependências
-# **Importante:** Agora deve apontar para as libs do Conda se necessário,
-# mas find_package geralmente configura isso melhor. Remover RPATH explícito por enquanto.
-# if(UNIX)
-#     if(APPLE)
-#         set(ORIGIN "@loader_path")
-#     else()
-#         set(ORIGIN "$ORIGIN")
-#     endif()
-#     
-#     set_target_properties(camera_pipeline_c PROPERTIES
-#         INSTALL_RPATH "${ORIGIN}/lib;${ORIGIN}"
-#         BUILD_WITH_INSTALL_RPATH TRUE
-#     )
-# endif()
+# do ambiente Conda onde foi compilada, mesmo quando carregada pelo Python.
+# $ORIGIN refere-se ao diretório onde a biblioteca (.so) está instalada.
+# '$ORIGIN/../..' deve apontar para $CONDA_PREFIX/lib/pythonX.Y/site-packages -> $CONDA_PREFIX/lib
+if(UNIX)
+    set(CMAKE_INSTALL_RPATH "$ORIGIN/../..") # Tentar ir dois níveis acima de site-packages/camera_pipeline/core
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE) # Garante que diretórios de link sejam adicionados ao RPATH
+    message(STATUS "Setting RPATH for UNIX to: ${CMAKE_INSTALL_RPATH}")
+endif()
 
 # Lincar dependências (FFmpeg e Pthreads)
 target_link_libraries(camera_pipeline_c PRIVATE 

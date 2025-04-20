@@ -11,10 +11,10 @@ dependencies:
   - c-compiler # Compilador C (ex: gcc no Linux)
   - cxx-compiler # Compilador C++ (ex: g++ no Linux)
   # Dependências da sua biblioteca
-  - ffmpeg
-  - opencv # Mantendo, assumindo que o projeto general usa
+  - ffmpeg>=6 # Usar uma versão mais recente se possível/compatível
   - pip:
       - paho-mqtt==1.6
+      - opencv-python # Instalar OpenCV via Pip
       # Instalar sua biblioteca via pip após criar o ambiente
   # Deixar o Conda escolher a versão compatível
   # - git+https://github.com/leandrozanatta/camera-pipeline.git 
