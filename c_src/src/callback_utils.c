@@ -243,6 +243,11 @@ void callback_pool_return_data(callback_frame_data_t* data) {
     data->pts = 0;
     data->width = 0;
     data->height = 0;
+    
+    // IMPORTANTE: Adicionar log para debug e manter o camera_id
+    log_message(LOG_LEVEL_INFO, "[Callback Pool] Retornando item com camera_id=%d para o pool", data->camera_id);
+    // NÃO zerar o camera_id aqui! Este pode ser o problema
+    // data->camera_id = 0; // <- Remover ou comentar se existe
 
     // --- Retornar ao pool --- 
     pthread_mutex_lock(&g_pool_mutex);
@@ -259,112 +264,56 @@ void callback_pool_return_data(callback_frame_data_t* data) {
     pthread_mutex_unlock(&g_pool_mutex);
 }
 
-callback_frame_data_t* callback_utils_create_data(AVFrame* src_frame, int camera_id) {
-    if (!src_frame) {
-        log_message(LOG_LEVEL_ERROR, "[Callback Utils] Tentativa de criar dados a partir de AVFrame nulo.");
+callback_frame_data_t* callback_utils_create_data(AVFrame* frame, int camera_id) {
+    // Validar os parâmetros
+    if (!frame) {
+        LOGF_ERR("callback_utils_create_data: Invalid NULL AVFrame given");
         return NULL;
     }
 
-    // Verificar se o formato é o esperado (BGR24)
-    if (src_frame->format != AV_PIX_FMT_BGR24) {
-         log_message(LOG_LEVEL_WARNING, "[Callback Utils] AVFrame não está no formato BGR24 esperado (formato: %d).", src_frame->format);
-         // Decidir se retorna NULL ou tenta processar mesmo assim?
-         // Retornar NULL é mais seguro por enquanto.
-         return NULL;
-    }
-    if (src_frame->width <= 0 || src_frame->height <= 0) {
-         log_message(LOG_LEVEL_WARNING, "[Callback Utils] AVFrame com dimensões inválidas (W: %d, H: %d).", src_frame->width, src_frame->height);
-         return NULL;
-    }
-
-    // Alocar a estrutura principal
-    callback_frame_data_t* cb_data = (callback_frame_data_t*)malloc(sizeof(callback_frame_data_t));
-    if (!cb_data) {
-        log_message(LOG_LEVEL_ERROR, "[Callback Utils] Falha ao alocar memória para callback_frame_data_t.");
-        return NULL;
-    }
-    memset(cb_data, 0, sizeof(callback_frame_data_t)); // Zera toda a estrutura
-
-    // Preencher metadados
-    cb_data->width = src_frame->width;
-    cb_data->height = src_frame->height;
-    cb_data->format = src_frame->format; // AV_PIX_FMT_BGR24
-    cb_data->pts = src_frame->pts;
-    cb_data->camera_id = camera_id;
-    cb_data->ref_count = 1;
-
-    // --- Cópia dos Dados do Buffer (Plano BGR) ---
-    int plane_index = 0; // BGR é "planar" mas usa apenas o plano 0
-    
-    // Validar ponteiro e linesize de origem
-    if (!src_frame->data[plane_index] || src_frame->linesize[plane_index] <= 0) {
-        log_message(LOG_LEVEL_ERROR, "[Callback Utils] Plano de dados BGR (índice %d) do AVFrame de origem é inválido.", plane_index);
-        free(cb_data); // Liberar estrutura principal alocada
-        return NULL;
-    }
-    
-    // Calcular tamanho necessário para o buffer de destino
-    // Para BGR24, a alinhamento padrão é 1
-    cb_data->data_buffer_size[plane_index] = av_image_get_buffer_size(
-        (enum AVPixelFormat)cb_data->format, 
-        cb_data->width, 
-        cb_data->height, 
-        1 // Alinhamento (alignment) - 1 para BGR geralmente
-    );
-
-    if (cb_data->data_buffer_size[plane_index] <= 0) {
-        log_message(LOG_LEVEL_ERROR, "[Callback Utils] Tamanho calculado para buffer BGR é inválido (%zu).", cb_data->data_buffer_size[plane_index]);
-        free(cb_data);
+    // Verificar formato do frame
+    if (frame->format != AV_PIX_FMT_BGR24 && frame->format != AV_PIX_FMT_RGB24) {
+        LOGF_ERR("callback_utils_create_data: Unsupported pixel format: %d (expected BGR24/RGB24)", frame->format);
         return NULL;
     }
 
-    // Alocar memória para a CÓPIA do buffer
-    cb_data->data[plane_index] = (uint8_t*)malloc(cb_data->data_buffer_size[plane_index]);
-    if (!cb_data->data[plane_index]) {
-        log_message(LOG_LEVEL_ERROR, "[Callback Utils] Falha ao alocar %zu bytes para cópia do plano BGR.", cb_data->data_buffer_size[plane_index]);
-        free(cb_data);
-        return NULL;
-    }
-    
-    // Definir o linesize de destino (para BGR é width * 3)
-    cb_data->linesize[plane_index] = cb_data->width * 3;
-    
-    // Copiar os dados do AVFrame para o novo buffer
-    int bytes_per_line_src = src_frame->linesize[plane_index];
-    int bytes_per_line_dst = cb_data->linesize[plane_index]; // Geralmente iguais para BGR
-    int bytes_to_copy_per_line = cb_data->width * 3;
-    
-    // Se os linesizes forem idênticos, podemos usar memcpy único (mais rápido)
-    if (bytes_per_line_src == bytes_per_line_dst && 
-        (size_t)bytes_per_line_src * cb_data->height == cb_data->data_buffer_size[plane_index]) 
-    {
-         memcpy(cb_data->data[plane_index], 
-                src_frame->data[plane_index], 
-                cb_data->data_buffer_size[plane_index]);
-         log_message(LOG_LEVEL_TRACE, "[Callback Utils] Cópia BGR realizada com memcpy único.");
-    } else {
-        // Se houver padding (linesize > width * 3) ou outra diferença,
-        // copiar linha por linha.
-        log_message(LOG_LEVEL_TRACE, "[Callback Utils] Cópia BGR linha por linha (src_stride=%d, dst_stride=%d).", 
-                    bytes_per_line_src, bytes_per_line_dst);
-        for (int y = 0; y < cb_data->height; ++y) {
-            memcpy(cb_data->data[plane_index] + y * bytes_per_line_dst,    // Destino
-                   src_frame->data[plane_index] + y * bytes_per_line_src, // Origem
-                   bytes_to_copy_per_line);                              // Quantidade
-        }
-    }
+    // Log do camera_id recebido como parâmetro para verificação
+    LOGF_DEBUG("callback_utils_create_data: Criando estrutura com camera_id=%d", camera_id);
 
-    // Validar se a cópia foi bem sucedida (verificação extra)
-    if (!cb_data->data[plane_index]) { // Improvável chegar aqui se malloc funcionou
-        log_message(LOG_LEVEL_ERROR, "[Callback Utils] ERRO CRÍTICO: Ponteiro de dados nulo após cópia!");
-        // Tentar liberar o que foi alocado
-        if(cb_data->data[plane_index]) free(cb_data->data[plane_index]);
-        free(cb_data);
+    // Validar dimensões
+    if (frame->width <= 0 || frame->height <= 0) {
+        LOGF_ERR("callback_utils_create_data: Invalid dimensions: %dx%d", frame->width, frame->height);
         return NULL;
     }
 
-    log_message(LOG_LEVEL_TRACE, "[Callback Utils] Estrutura callback_frame_data_t criada com sucesso (Ref: %p, PTS: %ld).", cb_data, cb_data->pts);
-    return cb_data;
+    // Alocar a estrutura
+    callback_frame_data_t* data = (callback_frame_data_t*)malloc(sizeof(callback_frame_data_t));
+    if (!data) {
+        LOGF_ERR("callback_utils_create_data: Failed to allocate callback_frame_data_t");
+        return NULL;
+    }
+
+    // Inicializar todos os campos para zero
+    memset(data, 0, sizeof(callback_frame_data_t));
+
+    // Preencher os campos básicos
+    data->camera_id = camera_id;
+    data->width = frame->width;
+    data->height = frame->height;
+    data->format = frame->format;
+    data->pts = frame->pts;
+
+    // Copiar linesizes e ponteiros de dados para cada plano
+    for (int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+        data->linesize[i] = frame->linesize[i];
+        data->data[i] = frame->data[i];
+    }
+
+    // Log dos valores e endereço antes de retornar
+    LOGF_DEBUG("callback_utils_create_data: Estrutura criada em %p com camera_id=%d, width=%d, height=%d", 
+               (void*)data, data->camera_id, data->width, data->height);
+
+    return data;
 }
 
 void callback_utils_free_data(callback_frame_data_t* data) {

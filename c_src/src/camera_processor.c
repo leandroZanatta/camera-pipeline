@@ -123,10 +123,16 @@ void send_frame_to_python(void* camera_context) {
         callback_frame_data_t* cb_data = callback_pool_get_data(frame_to_send, cam_id);
         
         if (cb_data) {
+            // MODIFICAÇÃO: Log de debug detalhado para diagnóstico
+            log_message(LOG_LEVEL_INFO, "[Send Frame ID BEFORE] Camera: %d, PTS: %ld, Address: %p", 
+                     cam_id, pts, (void*)cb_data);
+            log_message(LOG_LEVEL_INFO, "[Send Frame ID STRUCT] Campo ID na estrutura: %d, Width: %d, Height: %d", 
+                     cb_data->camera_id, cb_data->width, cb_data->height);
+            
             // MODIFICAÇÃO: Log para depuração que verifica consistência de IDs
             log_message(LOG_LEVEL_DEBUG, "[Send Frame ID %d] Enviando frame para Python (PTS: %ld, Camera ID estrutura: %d)", 
                      cam_id, pts, cb_data->camera_id);
-            cb(cb_data, user_data); 
+            cb(cb_data, user_data);
         } else {
             log_message(LOG_LEVEL_ERROR, "[Send Frame ID %d] Falha ao obter dados de callback do pool.", cam_id);
         }

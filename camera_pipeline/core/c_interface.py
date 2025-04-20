@@ -99,13 +99,15 @@ if not _load_c_library():
 
 class CallbackFrameData(ctypes.Structure):
     _fields_ = [
-        ("camera_id", ctypes.c_int),
         ("width", ctypes.c_int),
         ("height", ctypes.c_int),
-        ("format", ctypes.c_int), # Usar enum AV_PIX_FMT_*
+        ("format", ctypes.c_int),
         ("pts", ctypes.c_int64),
-        ("data", ctypes.POINTER(ctypes.c_uint8) * 4), # Dados do plano (até 4 planos)
-        ("linesize", ctypes.c_int * 4)       # Linesize do plano (até 4 planos)
+        ("camera_id", ctypes.c_int),
+        ("ref_count", ctypes.c_int),
+        ("data", ctypes.POINTER(ctypes.c_uint8) * 4),
+        ("linesize", ctypes.c_int * 4),
+        ("data_buffer_size", ctypes.c_size_t * 4)
     ]
 
 # --- Definição dos Tipos de Callback --- 
