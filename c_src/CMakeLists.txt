@@ -1,18 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 project(camera_pipeline_c C)
 
-# --- Tentar detectar e usar o ambiente Conda ---
-if(DEFINED ENV{CONDA_PREFIX} AND IS_DIRECTORY "$ENV{CONDA_PREFIX}")
-    message(STATUS "Ambiente Conda detectado em: $ENV{CONDA_PREFIX}")
-    # Prepend Conda prefix to CMake search paths
-    list(PREPEND CMAKE_PREFIX_PATH "$ENV{CONDA_PREFIX}")
-else()
-    message(WARNING "Variável de ambiente CONDA_PREFIX não definida ou inválida. A busca por FFmpeg pode falhar se não estiver nos caminhos padrão.")
-endif()
+# --- Adicionar caminho para nossos módulos CMake ---
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # --------------------------------------------
 
-# Configuração: usar FFmpeg do sistema
-option(USE_SYSTEM_FFMPEG "Usar FFmpeg do sistema" ON)
+# Configuração: usar FFmpeg do sistema (o FindFFmpeg.cmake tentará encontrá-lo)
+option(USE_SYSTEM_FFMPEG "Usar FFmpeg do sistema" ON) # Pode ser redundante agora
 
 # Adicionar flags de otimização para builds de Release
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3" CACHE STRING "C flags for Release builds" FORCE)
