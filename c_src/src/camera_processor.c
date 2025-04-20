@@ -14,6 +14,9 @@
 #include <string.h> 
 #include <pthread.h>
 #include <errno.h> 
+#include <signal.h> // Para uso de sinais em threads
+#include <unistd.h> // Para pipe()
+#include <time.h>   // Para timeouts
 
 // Includes FFmpeg (completos para tipos da struct e init/deinit)
 #include <libavformat/avformat.h>
@@ -22,16 +25,21 @@
 #include <libavutil/frame.h> 
 #include <libavutil/pixfmt.h> 
 
+// Definições de constantes
+#define THREAD_JOIN_TIMEOUT_SEC 3  // Timeout para join de threads (segundos)
+#define MAX_INTERRUPTION_WAIT_MS 500 // Tempo máximo para aguardar interrupção
+
 // Função da thread (declarar aqui para ser usada por pthread_create)
 extern void* run_camera_loop(void* arg);
 
 // --- Variáveis Globais Estáticas (Nível do Processador) --- 
 
-// Estrutura para manter os contextos de câmera em uma tabela hash
+// MODIFICAÇÃO: Estrutura alterada para armazenar ponteiro para contexto
+// ao invés da estrutura inteira, evitando problemas de reorganização da hash
 typedef struct {
-    int camera_id;                    // ID da câmera (chave da hash)
-    camera_thread_context_t context;  // Contexto da câmera
-    UT_hash_handle hh;                // Tornando esta estrutura "hashable"
+    int camera_id;                      // ID da câmera (chave da hash)
+    camera_thread_context_t *context;   // PONTEIRO para contexto da câmera
+    UT_hash_handle hh;                  // Tornando esta estrutura "hashable"
 } camera_context_hash_t;
 
 // Tabela hash para armazenar os contextos de câmera
@@ -41,7 +49,10 @@ static camera_context_hash_t *g_camera_contexts = NULL;
 static pthread_mutex_t contexts_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Flag global para indicar se o sistema está inicializado
-static bool g_processor_initialized = false;
+static volatile bool g_processor_initialized = false;
+
+// Pipe para interrupção de threads bloqueadas
+static int g_interrupt_pipe[2] = {-1, -1};
 
 // --- Funções de Gerenciamento Interno de Contexto --- 
 
@@ -52,6 +63,23 @@ static camera_context_hash_t* find_context_by_id(int camera_id) {
     return context;
 }
 
+// Nova função para interromper uma thread bloqueada
+static void interrupt_camera_thread(pthread_t thread_id) {
+    // Primeiro, tenta sinalizar via pipe
+    if (g_interrupt_pipe[1] != -1) {
+        char c = 'I'; // 'I' para interrupção
+        if (write(g_interrupt_pipe[1], &c, 1) == -1) {
+            log_message(LOG_LEVEL_ERROR, "[Thread Interrupt] Falha ao sinalizar via pipe: %s", strerror(errno));
+        }
+    }
+    
+    // Envia SIGUSR1 como backup para casos onde o pipe não funciona
+    // Este sinal deve ser tratado na thread para terminar graciosamente
+    if (pthread_kill(thread_id, SIGUSR1) != 0) {
+        log_message(LOG_LEVEL_ERROR, "[Thread Interrupt] Falha ao enviar sinal para thread: %s", strerror(errno));
+    }
+}
+
 // Função chamada pela thread da câmera para enviar um frame BGR processado
 void send_frame_to_python(void* camera_context) {
     camera_thread_context_t* ctx = (camera_thread_context_t*)camera_context;
@@ -60,16 +88,25 @@ void send_frame_to_python(void* camera_context) {
         return;
     }
     
-    // Bloquear para ler dados do contexto com segurança?
-    // Provavelmente não necessário para frame_cb e user_data que são definidos uma vez.
-    // Mas acessar 'active' pode precisar.
+    // Bloquear para ler dados do contexto com segurança
     pthread_mutex_lock(&contexts_mutex);
-    bool is_active = ctx->active; // Ler estado ativo sob lock
-    frame_callback_t cb = ctx->frame_cb;
-    void* user_data = ctx->frame_cb_user_data;
-    AVFrame* frame_to_send = ctx->frame_bgr;
-    int cam_id = ctx->camera_id;
-    int64_t pts = ctx ? ctx->frame_bgr->pts : -1; // Obter PTS antes de desbloquear
+    
+    // MODIFICAÇÃO: Verificar se a câmera ainda existe na tabela hash
+    camera_context_hash_t *hash_entry = find_context_by_id(ctx->camera_id);
+    if (!hash_entry || !hash_entry->context || !hash_entry->context->active) {
+        log_message(LOG_LEVEL_WARNING, "[Send Frame] Câmera ID %d não encontrada ou inativa.", ctx->camera_id);
+        pthread_mutex_unlock(&contexts_mutex);
+        return;
+    }
+    
+    // MODIFICAÇÃO: Usar o ponteiro do contexto da hash para garantir consistência
+    bool is_active = hash_entry->context->active;
+    frame_callback_t cb = hash_entry->context->frame_cb;
+    void* user_data = hash_entry->context->frame_cb_user_data;
+    AVFrame* frame_to_send = hash_entry->context->frame_bgr;
+    int cam_id = hash_entry->context->camera_id;
+    int64_t pts = frame_to_send ? frame_to_send->pts : -1;
+    
     pthread_mutex_unlock(&contexts_mutex);
 
     if (!is_active) {
@@ -86,7 +123,9 @@ void send_frame_to_python(void* camera_context) {
         callback_frame_data_t* cb_data = callback_pool_get_data(frame_to_send, cam_id);
         
         if (cb_data) {
-            log_message(LOG_LEVEL_TRACE, "[Send Frame ID %d] Enviando frame para Python (PTS: %ld)", cam_id, pts);
+            // MODIFICAÇÃO: Log para depuração que verifica consistência de IDs
+            log_message(LOG_LEVEL_DEBUG, "[Send Frame ID %d] Enviando frame para Python (PTS: %ld, Camera ID estrutura: %d)", 
+                     cam_id, pts, cb_data->camera_id);
             cb(cb_data, user_data); 
         } else {
             log_message(LOG_LEVEL_ERROR, "[Send Frame ID %d] Falha ao obter dados de callback do pool.", cam_id);
@@ -100,8 +139,8 @@ void send_frame_to_python(void* camera_context) {
 // Deve ser chamado com contexts_mutex BLOQUEADO
 static void mark_context_inactive(int camera_id) {
     camera_context_hash_t *context_entry = find_context_by_id(camera_id);
-    if (context_entry && context_entry->context.active) {
-        context_entry->context.active = false;
+    if (context_entry && context_entry->context && context_entry->context->active) {
+        context_entry->context->active = false;
         log_message(LOG_LEVEL_DEBUG, "[Context Mgr] ID %d marcado como inativo.", camera_id);
     } else {
         log_message(LOG_LEVEL_WARNING, "[Context Mgr] Tentativa de marcar ID inválido (%d) ou já inativo como inativo.", camera_id);
@@ -123,6 +162,13 @@ int processor_initialize(void)
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Inicializando hash de contextos para IDs dinâmicos");
     g_camera_contexts = NULL; // A tabela hash começa vazia
 
+    // MODIFICAÇÃO: Criar pipe para sinalização de interrupção
+    if (pipe(g_interrupt_pipe) == -1) {
+        log_message(LOG_LEVEL_ERROR, "[Processor API] Falha ao criar pipe para interrupção: %s", strerror(errno));
+    } else {
+        log_message(LOG_LEVEL_DEBUG, "[Processor API] Pipe de interrupção criado com sucesso");
+    }
+
     // Inicializar rede FFmpeg 
     int net_ret = avformat_network_init();
     if (net_ret != 0) {
@@ -134,6 +180,12 @@ int processor_initialize(void)
          log_message(LOG_LEVEL_ERROR, "[Processor API] Falha ao inicializar o pool de callbacks!");
          // Limpar rede FFmpeg se falhar?
          avformat_network_deinit();
+         
+         // Fechar pipe de interrupção
+         if (g_interrupt_pipe[0] != -1) close(g_interrupt_pipe[0]);
+         if (g_interrupt_pipe[1] != -1) close(g_interrupt_pipe[1]);
+         g_interrupt_pipe[0] = g_interrupt_pipe[1] = -1;
+         
          pthread_mutex_unlock(&contexts_mutex);
          return -1; // Indicar erro na inicialização
     }
@@ -174,31 +226,47 @@ int processor_add_camera(int camera_id,
         return -4; // Erro: ID já em uso
     }
 
-    // 3. Criar uma nova entrada na tabela hash
+    // MODIFICAÇÃO: 3. Alocar contexto e entrada de hash separadamente
+    // Primeiro alocamos o contexto
+    camera_thread_context_t *ctx = (camera_thread_context_t*)malloc(sizeof(camera_thread_context_t));
+    if (!ctx) {
+        log_message(LOG_LEVEL_ERROR, "[Processor API] Falha ao alocar memória para contexto de câmera.");
+        pthread_mutex_unlock(&contexts_mutex);
+        return -5; // Erro: Falha de alocação
+    }
+    
+    // Agora alocamos a entrada da hash
     context_entry = (camera_context_hash_t*)malloc(sizeof(camera_context_hash_t));
     if (!context_entry) {
-        log_message(LOG_LEVEL_ERROR, "[Processor API] Falha ao alocar memória para novo contexto de câmera.");
+        log_message(LOG_LEVEL_ERROR, "[Processor API] Falha ao alocar memória para entrada de hash.");
+        free(ctx);
         pthread_mutex_unlock(&contexts_mutex);
         return -5; // Erro: Falha de alocação
     }
 
     // 4. Inicializar o contexto
+    memset(ctx, 0, sizeof(camera_thread_context_t));
+    ctx->camera_id = camera_id;
+    ctx->active = true;
+    ctx->stop_requested = false;
+    ctx->state = CAM_STATE_CONNECTING;
+    strncpy(ctx->url, url, MAX_URL_LENGTH - 1);
+    ctx->url[MAX_URL_LENGTH - 1] = '\0';
+    ctx->status_cb = status_cb;
+    ctx->frame_cb = frame_cb;
+    ctx->status_cb_user_data = status_cb_user_data;
+    ctx->frame_cb_user_data = frame_cb_user_data;
+    ctx->target_fps = (target_fps <= 0) ? 1 : target_fps;
+    ctx->video_stream_index = -1;
+    ctx->reconnect_attempts = 0;
+    ctx->frame_skip_count = 1; // Default inicial
+    
+    // Configurar referência ao pipe de interrupção
+    ctx->interrupt_read_fd = g_interrupt_pipe[0];
+    
+    // Inicializar a entrada da hash
     context_entry->camera_id = camera_id;
-    memset(&context_entry->context, 0, sizeof(camera_thread_context_t));
-    context_entry->context.camera_id = camera_id;
-    context_entry->context.active = true;
-    context_entry->context.stop_requested = false;
-    context_entry->context.state = CAM_STATE_CONNECTING;
-    strncpy(context_entry->context.url, url, MAX_URL_LENGTH - 1);
-    context_entry->context.url[MAX_URL_LENGTH - 1] = '\0';
-    context_entry->context.status_cb = status_cb;
-    context_entry->context.frame_cb = frame_cb;
-    context_entry->context.status_cb_user_data = status_cb_user_data;
-    context_entry->context.frame_cb_user_data = frame_cb_user_data;
-    context_entry->context.target_fps = (target_fps <= 0) ? 1 : target_fps;
-    context_entry->context.video_stream_index = -1;
-    context_entry->context.reconnect_attempts = 0;
-    context_entry->context.frame_skip_count = 1; // Default inicial
+    context_entry->context = ctx;
 
     // 5. Adicionar à tabela hash
     HASH_ADD_INT(g_camera_contexts, camera_id, context_entry);
@@ -206,12 +274,13 @@ int processor_add_camera(int camera_id,
 
     // 6. Criar a thread para este contexto
     log_message(LOG_LEVEL_INFO, "[Processor API] Criando thread para câmera ID %d (URL: %s)", camera_id, url);
-    int rc = pthread_create(&context_entry->context.thread_id, NULL, run_camera_loop, &context_entry->context);
+    int rc = pthread_create(&ctx->thread_id, NULL, run_camera_loop, ctx);
     
     if (rc) {
         log_message(LOG_LEVEL_ERROR, "[Processor API] Erro ao criar thread para câmera ID %d: %d (%s)", camera_id, rc, strerror(rc));
         // Remover da tabela hash se a thread não pôde ser criada
         HASH_DEL(g_camera_contexts, context_entry);
+        free(ctx);
         free(context_entry);
         pthread_mutex_unlock(&contexts_mutex);
         return -6; // Erro: Falha na criação da thread
@@ -232,20 +301,42 @@ int processor_stop_camera(int camera_id) {
 
     // Encontrar o contexto pelo ID
     camera_context_hash_t *context_entry = find_context_by_id(camera_id);
-    if (!context_entry || !context_entry->context.active) {
+    if (!context_entry || !context_entry->context || !context_entry->context->active) {
         log_message(LOG_LEVEL_WARNING, "[Processor API] Tentativa de parar câmera inativa ou ID inválido (%d).", camera_id);
         pthread_mutex_unlock(&contexts_mutex);
         return -2; // ID inválido ou inativo
     }
 
+    // MODIFICAÇÃO: Armazenar thread_id antes de desbloquear o mutex
+    pthread_t thread_to_stop = context_entry->context->thread_id;
+    
     log_message(LOG_LEVEL_INFO, "[Processor API] Solicitando parada da câmera ID %d...", camera_id);
-    context_entry->context.stop_requested = true;
-    // Não fazemos join aqui, apenas sinalizamos.
-    // A thread deve verificar stop_requested e sair.
-    // O join será feito em processor_shutdown.
-
+    context_entry->context->stop_requested = true;
+    
+    // MODIFICAÇÃO: Interromper a thread se estiver bloqueada
+    interrupt_camera_thread(thread_to_stop);
+    
     pthread_mutex_unlock(&contexts_mutex);
-    return 0; // Solicitação enviada
+    
+    // MODIFICAÇÃO: Usar tryjoin ou join simples em vez de timedjoin
+    // Primeiro tenta join não bloqueante
+    int join_result = pthread_tryjoin_np(thread_to_stop, NULL);
+    if (join_result == 0) {
+        log_message(LOG_LEVEL_DEBUG, "[Processor API] Thread para câmera ID %d encerrada com sucesso.", camera_id);
+        
+        // Thread encerrou, marcar como inativo
+        pthread_mutex_lock(&contexts_mutex);
+        mark_context_inactive(camera_id);
+        pthread_mutex_unlock(&contexts_mutex);
+    } else if (join_result == EBUSY) {
+        // Thread ainda em execução, não bloquear aqui
+        log_message(LOG_LEVEL_WARNING, "[Processor API] Thread da câmera ID %d ainda em execução.", camera_id);
+    } else {
+        log_message(LOG_LEVEL_ERROR, "[Processor API] Erro ao verificar thread da câmera ID %d: %s", 
+                   camera_id, strerror(join_result));
+    }
+    
+    return 0;
 }
 
 int processor_shutdown(void) {
@@ -282,11 +373,15 @@ int processor_shutdown(void) {
     // 2. Sinalizar todas as threads ativas para parar e coletar seus IDs
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Sinalizando parada para threads ativas...");
     HASH_ITER(hh, g_camera_contexts, current, tmp) {
-        if (current->context.active) {
+        if (current->context && current->context->active) {
             log_message(LOG_LEVEL_DEBUG, "[Processor API] Sinalizando câmera ID %d.", current->camera_id);
-            current->context.stop_requested = true;
+            current->context->stop_requested = true;
+            
+            // MODIFICAÇÃO: Interromper cada thread diretamente
+            interrupt_camera_thread(current->context->thread_id);
+            
             if (threads_to_join) {
-                threads_to_join[active_count].thread_id = current->context.thread_id;
+                threads_to_join[active_count].thread_id = current->context->thread_id;
                 threads_to_join[active_count].camera_id = current->camera_id;
                 active_count++;
             }
@@ -302,18 +397,35 @@ int processor_shutdown(void) {
         log_message(LOG_LEVEL_INFO, "[Processor API] Aguardando término das threads...");
         for (int i = 0; i < active_count; ++i) {
             log_message(LOG_LEVEL_DEBUG, "[Processor API] Aguardando join da thread para câmera ID %d...", threads_to_join[i].camera_id);
-            int rc = pthread_join(threads_to_join[i].thread_id, NULL);
-            if (rc) {
+            
+            // Tentar join com tempo limite usando método alternativo
+            // Primeiro dá um tempo curto para a thread terminar naturalmente
+            struct timespec wait_time = {0, 100000000}; // 100ms
+            nanosleep(&wait_time, NULL);
+            
+            // Tenta join não bloqueante
+            int rc = pthread_tryjoin_np(threads_to_join[i].thread_id, NULL);
+            
+            if (rc == EBUSY) {
+                // Thread ainda em execução após tempo de espera, forçar encerramento
+                log_message(LOG_LEVEL_WARNING, "[Processor API] Thread para câmera ID %d não terminou no tempo esperado. Forçando encerramento.", 
+                            threads_to_join[i].camera_id);
+                // Forçar encerramento da thread
+                pthread_cancel(threads_to_join[i].thread_id);
+                // Fazer join após cancel
+                pthread_join(threads_to_join[i].thread_id, NULL);
+            } else if (rc != 0) {
                 log_message(LOG_LEVEL_ERROR, "[Processor API] Erro (%d: %s) ao aguardar join da thread para câmera ID %d.", 
                             rc, strerror(rc), threads_to_join[i].camera_id);
                 // Continuar tentando fazer join das outras
             } else {
                 log_message(LOG_LEVEL_DEBUG, "[Processor API] Join da thread para câmera ID %d concluído.", threads_to_join[i].camera_id);
-                // Marcar como inativo APÓS o join bem-sucedido
-                pthread_mutex_lock(&contexts_mutex);
-                mark_context_inactive(threads_to_join[i].camera_id);
-                pthread_mutex_unlock(&contexts_mutex);
             }
+            
+            // Marcar como inativo APÓS o join (bem-sucedido ou forçado)
+            pthread_mutex_lock(&contexts_mutex);
+            mark_context_inactive(threads_to_join[i].camera_id);
+            pthread_mutex_unlock(&contexts_mutex);
         }
         free(threads_to_join);
         log_message(LOG_LEVEL_INFO, "[Processor API] Todas as threads ativas finalizaram.");
@@ -322,12 +434,20 @@ int processor_shutdown(void) {
     // 4. Limpar a tabela hash e liberar os recursos
     pthread_mutex_lock(&contexts_mutex);
     
-    // Liberar cada entrada da hash
+    // Liberar cada entrada da hash e seu contexto associado
     HASH_ITER(hh, g_camera_contexts, current, tmp) {
         HASH_DEL(g_camera_contexts, current);
-        free(current);
+        if (current->context) {
+            free(current->context); // Liberar o contexto alocado
+        }
+        free(current); // Liberar a entrada da hash
     }
     g_camera_contexts = NULL;
+    
+    // Fechar pipe de interrupção
+    if (g_interrupt_pipe[0] != -1) close(g_interrupt_pipe[0]);
+    if (g_interrupt_pipe[1] != -1) close(g_interrupt_pipe[1]);
+    g_interrupt_pipe[0] = g_interrupt_pipe[1] = -1;
     
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Desinicializando rede FFmpeg...");
     avformat_network_deinit(); 

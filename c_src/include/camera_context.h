@@ -77,6 +77,9 @@ typedef struct {
     struct timespec initialization_start_time; // Hora que a tentativa começou
     bool is_initializing;                  // Flag para indicar se estamos na fase de init
 
+    // Campo para interrupção de threads bloqueadas
+    int interrupt_read_fd;       // Descritor de arquivo para interrupção via pipe
+
 } camera_thread_context_t;
 
 #endif // CAMERA_CONTEXT_H 

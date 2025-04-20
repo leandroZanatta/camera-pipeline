@@ -12,6 +12,9 @@
 #include <unistd.h> 
 #include <time.h>   
 #include <errno.h> // Incluir para strerror
+#include <signal.h>
+#include <fcntl.h>
+#include <sys/select.h>
 
 // FFmpeg includes necessários para operações de decodificação completas
 #include <libavformat/avformat.h>
@@ -84,34 +87,69 @@ static void update_camera_status(camera_thread_context_t* ctx, camera_state_t ne
 //     return (end->tv_sec - start->tv_sec) + (end->tv_nsec - start->tv_nsec) / 1.0e9;
 // }
 
-// Callback de interrupção para FFmpeg (NOVA LÓGICA COM TIMEOUT)
-static int interrupt_callback(void* opaque) {
-    camera_thread_context_t* ctx = (camera_thread_context_t*)opaque;
-    if (!ctx) return 1;
+// Tratador de sinal para SIGUSR1 
+static void handle_sigusr1(int sig) {
+    // Este handler não precisa fazer nada além de existir
+    // O objetivo é apenas interromper chamadas bloqueantes como av_read_frame
+    log_message(LOG_LEVEL_DEBUG, "[Signal Handler] Recebido sinal SIGUSR1 para interrupção de thread");
+}
 
-    // 1. Verificar parada solicitada externamente
-    if (ctx->stop_requested) {
-        // Log reduzido ou comentado para não poluir em operação normal
-        // log_message(LOG_LEVEL_DEBUG, "[Interrupt ID %d] Interrupt requested (stop_requested=true). Returning 1.", ctx->camera_id);
-        return 1;
+// Configurar o tratador de sinais para a thread
+static void setup_signal_handler() {
+    struct sigaction sa;
+    sa.sa_handler = handle_sigusr1;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        log_message(LOG_LEVEL_ERROR, "[Camera Thread] Falha ao configurar handler para SIGUSR1: %s", strerror(errno));
+    } else {
+        log_message(LOG_LEVEL_DEBUG, "[Camera Thread] Handler para SIGUSR1 configurado com sucesso");
     }
+}
 
-    // 2. Verificar timeout de inicialização
-    if (ctx->is_initializing) {
-        struct timespec current_time;
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
-        // Usar função timespec_diff_s que já existe mais abaixo
-        double elapsed_seconds = timespec_diff_s(&ctx->initialization_start_time, &current_time);
-
-        if (elapsed_seconds > INITIALIZATION_TIMEOUT_SECONDS) {
-            log_message(LOG_LEVEL_WARNING, "[Interrupt ID %d] Initialization timeout (%.1f > %d s). Aborting FFmpeg call.", 
-                        ctx->camera_id, elapsed_seconds, INITIALIZATION_TIMEOUT_SECONDS);
-            ctx->is_initializing = false; // Resetar flag ao forçar saída
-            return 1; // Força a interrupção da chamada FFmpeg
+// Função para verificar se há interrupção no pipe
+static bool check_interrupt_pipe(int fd) {
+    if (fd < 0) return false;
+    
+    fd_set readfds;
+    struct timeval tv = {0, 0}; // Poll não-bloqueante
+    
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    
+    int ret = select(fd + 1, &readfds, NULL, NULL, &tv);
+    if (ret > 0 && FD_ISSET(fd, &readfds)) {
+        char buf[10];
+        // Ler e descartar dados do pipe
+        if (read(fd, buf, sizeof(buf)) > 0) {
+            log_message(LOG_LEVEL_DEBUG, "[Camera Thread] Interrupção detectada pelo pipe");
+            return true;
         }
     }
+    
+    return false;
+}
 
-    return 0; // Não interromper
+// Modificar a função interrupt_callback para verificar o pipe
+static int interrupt_callback(void* opaque) {
+    camera_thread_context_t* ctx = (camera_thread_context_t*)opaque;
+    if (!ctx) return 0; // Sem interrupção se contexto inválido
+    
+    // Verificar se há pedido explícito de parada
+    if (ctx->stop_requested) {
+        log_message(LOG_LEVEL_DEBUG, "[Camera Thread] Interrupção solicitada via stop_requested");
+        return 1; // Interromper operações FFmpeg
+    }
+    
+    // Verificar se há interrupção via pipe
+    if (check_interrupt_pipe(ctx->interrupt_read_fd)) {
+        log_message(LOG_LEVEL_DEBUG, "[Camera Thread] Interrupção via pipe detectada");
+        ctx->stop_requested = true; // Marcar como solicitação de parada
+        return 1;
+    }
+    
+    return 0; // Continuar operação
 }
 
 // --- Novas Funções Auxiliares para a Lógica da Thread (já recebem ctx) ---
@@ -580,6 +618,9 @@ void* run_camera_loop(void* arg) {
     ctx->last_sent_pts = AV_NOPTS_VALUE; // Inicializar PTS
 
     AVDictionary *opts = NULL; // Mover declaração para fora do loop
+
+    // Configurar handler de sinais para permitir interrupção
+    setup_signal_handler();
 
     while (true) {
         if (ctx->stop_requested) { 
