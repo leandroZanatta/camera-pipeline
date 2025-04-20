@@ -30,41 +30,6 @@ set(SOURCE_FILES
 # Criar a biblioteca compartilhada
 add_library(camera_pipeline_c SHARED ${SOURCE_FILES})
 
-# --- Comando para copiar a biblioteca compilada para a árvore de fontes Python ---
-# Obter o nome do arquivo da biblioteca (varia por plataforma)
-get_target_property(LIB_OUTPUT_NAME camera_pipeline_c OUTPUT_NAME)
-if(WIN32)
-  set(LIB_SUFFIX ".dll")
-elseif(APPLE)
-  set(LIB_SUFFIX ".dylib")
-else()
-  set(LIB_SUFFIX ".so")
-endif()
-# O OUTPUT_NAME já deve ter o prefixo removido no Linux via set_target_properties.
-set(BUILT_LIBRARY_NAME "${LIB_OUTPUT_NAME}${LIB_SUFFIX}")
-# Onde a biblioteca é criada pelo compilador (geralmente o diretório binário atual)
-set(BUILT_LIBRARY_PATH "${CMAKE_CURRENT_BINARY_DIR}/${BUILT_LIBRARY_NAME}") 
-
-# Definir o destino da cópia dentro da árvore de fontes Python
-# (Relativo a este CMakeLists.txt em c_src/)
-set(PYTHON_PACKAGE_DEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../camera_pipeline/core")
-
-# Garantir que o diretório de destino exista
-add_custom_command(
-    OUTPUT ${PYTHON_PACKAGE_DEST_DIR}/${BUILT_LIBRARY_NAME}
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${PYTHON_PACKAGE_DEST_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${BUILT_LIBRARY_PATH}"
-            "${PYTHON_PACKAGE_DEST_DIR}/${BUILT_LIBRARY_NAME}"
-    DEPENDS camera_pipeline_c # Depende do target da biblioteca
-    COMMENT "Copiando ${BUILT_LIBRARY_NAME} para ${PYTHON_PACKAGE_DEST_DIR}..."
-)
-
-# Adicionar a saída do comando customizado como fonte para um target dummy
-# Isso ajuda a garantir que o comando seja executado.
-add_custom_target(copy_library_to_package ALL DEPENDS ${PYTHON_PACKAGE_DEST_DIR}/${BUILT_LIBRARY_NAME})
-# -----------------------------------------------------------------------------
-
 # Adicionar diretório de includes
 target_include_directories(camera_pipeline_c PRIVATE 
     include # Nosso diretório de includes
@@ -106,8 +71,9 @@ target_link_libraries(camera_pipeline_c PRIVATE
     ${SWSCALE_LIBRARIES}
 )
 
-# Instalar a biblioteca principal sob o prefixo gerenciado por scikit-build
+# Instalar a biblioteca onde scikit-build espera encontrá-la
+# baseado na declaração Extension("camera_pipeline.core.camera_pipeline_c", ...)
 install(TARGETS camera_pipeline_c
-        LIBRARY DESTINATION . 
-        ARCHIVE DESTINATION .
-)
+        LIBRARY DESTINATION camera_pipeline/core # Relativo ao prefixo de instalação CMake
+        ARCHIVE DESTINATION camera_pipeline/core # Relativo ao prefixo de instalação CMake
+       )
