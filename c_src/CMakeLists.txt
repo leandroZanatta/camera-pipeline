@@ -71,9 +71,9 @@ target_link_libraries(camera_pipeline_c PRIVATE
     ${SWSCALE_LIBRARIES}
 )
 
-# Instalar a biblioteca na raiz do diretório de instalação do CMake
-# scikit-build-core mapeará isso para camera_pipeline/core na wheel
+# Instalar a biblioteca no subdiretório correto relativo à raiz da instalação CMake
+# Como wheel.install-dir="" no pyproject.toml, este caminho será preservado na wheel.
 install(TARGETS camera_pipeline_c
-        LIBRARY DESTINATION . 
-        ARCHIVE DESTINATION .
+        LIBRARY DESTINATION camera_pipeline/core 
+        ARCHIVE DESTINATION camera_pipeline/core
        )
