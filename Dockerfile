@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install --upgrade pip
 
+# Limpar o cache do pip
+RUN pip cache purge
+
 # Diretório de trabalho
 WORKDIR /app
 
