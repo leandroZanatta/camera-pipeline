@@ -41,12 +41,4 @@ minimum-version = "3.10"
 config = "Release"
 
 [tool.cmake.find]
-find_package = "FFmpeg"
-
-[tool.cmake.options]
-FFMPEG_INCLUDE_DIR = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib"
-FFMPEG_LIBRARY_DIR = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib"
-
-[tool.cmake.build-options]
-CMAKE_BUILD_TYPE = "Release"
-CMAKE_INSTALL_PREFIX = "${PROJECT_SOURCE_DIR}/camera_pipeline/core/camera_processor/lib" 
+find_package = "FFmpeg" 

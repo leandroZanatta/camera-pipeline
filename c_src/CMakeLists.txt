@@ -71,8 +71,8 @@ target_link_libraries(camera_pipeline_c PRIVATE
     ${SWSCALE_LIBRARIES}
 )
 
-# Instalar a biblioteca principal diretamente no pacote Python
+# Instalar a biblioteca principal sob o prefixo gerenciado por scikit-build
 install(TARGETS camera_pipeline_c
-        LIBRARY DESTINATION ../camera_pipeline/core 
-        ARCHIVE DESTINATION ../camera_pipeline/core
+        LIBRARY DESTINATION . 
+        ARCHIVE DESTINATION .
 )

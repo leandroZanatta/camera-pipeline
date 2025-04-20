@@ -1,12 +1,18 @@
 # Incluir arquivos de configuração e documentação
 include pyproject.toml
-include README.md
+# include README.md # Descomente se existir
 
 # Incluir recursivamente o código Python
 recursive-include camera_pipeline *.py
 
 # Incluir recursivamente os fontes C e CMakeLists
 recursive-include c_src *
+
+# Remover includes explícitos da biblioteca .so - confiar no scikit-build
+# include camera_pipeline/core/*.so
+# include camera_pipeline/core/*.dylib
+# include camera_pipeline/core/*.pyd
+# include camera_pipeline/core/*.dll
 
 # Incluir a biblioteca compilada no local onde o CMake a instala
 # (Ajuste o caminho/extensão conforme necessário para diferentes OS)
