@@ -37,4 +37,11 @@ void log_message(log_level_t level, const char* format, ...);
  */
 void log_ffmpeg_error(log_level_t level, const char* prefix, int error_code);
 
+// --- Macros de Log de conveniência ---
+#define LOGF_ERR(fmt, ...)   log_message(LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define LOGF_WARN(fmt, ...)  log_message(LOG_LEVEL_WARNING, fmt, ##__VA_ARGS__)
+#define LOGF_INFO(fmt, ...)  log_message(LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define LOGF_DEBUG(fmt, ...) log_message(LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define LOGF_TRACE(fmt, ...) log_message(LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+
 #endif // LOGGER_H 
