@@ -1,14 +1,20 @@
 name: general
 channels:
+  - conda-forge # Priorizar conda-forge para compiladores e cmake
   - defaults
-  - conda-forge
 dependencies:
   - python=3.10
   - pip
-  # Deixar o Conda escolher a versão compatível
+  # Dependências de build C/C++
+  - cmake>=3.16 # Versão mínima consistente
+  - ninja
+  - c-compiler # Compilador C (ex: gcc no Linux)
+  - cxx-compiler # Compilador C++ (ex: g++ no Linux)
+  # Dependências da sua biblioteca
   - ffmpeg
-  - opencv # Manter se o projeto general usa
+  - opencv # Mantendo, assumindo que o projeto general usa
   - pip:
       - paho-mqtt==1.6
-      # Remover a instalação pip da biblioteca por enquanto
-      # - git+https://github.com/leandrozanatta/camera-pipeline.git 
+      # Instalar sua biblioteca via pip após criar o ambiente
+  # Deixar o Conda escolher a versão compatível
+  # - git+https://github.com/leandrozanatta/camera-pipeline.git 

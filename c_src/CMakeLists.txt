@@ -1,12 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(camera_pipeline_c C)
 
-# --- Adicionar caminho para nossos módulos CMake ---
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-# --------------------------------------------
-
-# Configuração: usar FFmpeg do sistema (o FindFFmpeg.cmake tentará encontrá-lo)
-option(USE_SYSTEM_FFMPEG "Usar FFmpeg do sistema" ON) # Pode ser redundante agora
+# Configuração: usar FFmpeg (CMake padrão deve encontrar no Conda)
+option(USE_SYSTEM_FFMPEG "Usar FFmpeg do sistema" ON) # Pode remover esta opção agora
 
 # Adicionar flags de otimização para builds de Release
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3" CACHE STRING "C flags for Release builds" FORCE)
