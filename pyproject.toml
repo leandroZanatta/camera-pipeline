@@ -44,7 +44,7 @@ wheel.install-dir = ""
 
 # Garantir que os pacotes Python sejam incluídos
 # Descoberta automática deve funcionar, mas podemos ser explícitos:
-# wheel.packages = ["camera_pipeline"]
+wheel.packages = ["camera_pipeline"]
 
 # Controla se binários na wheel são "stripped" (removidos símbolos de debug)
 #wheel.strip = False 
