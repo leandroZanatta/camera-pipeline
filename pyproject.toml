@@ -17,18 +17,15 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.8"
 
-dependencies = [
-    "opencv-python==4.11.0.86"
-]
+dependencies = []
 
 [project.urls]
 "Homepage" = "https://github.com/leandroZanatta/camera-pipeline"
 
 [project.optional-dependencies]
 numpy = ["numpy>=1.26.4"]
-ui = ["PySide6>=6.5.0"]
 dev = ["pytest>=7.4.2", "black>=23.9.1"]
-full = ["numpy>=1.26.4", "PySide6>=6.5.0", "pytest>=7.4.2", "black>=23.9.1"]
+full = ["numpy>=1.26.4", "pytest>=7.4.2", "black>=23.9.1"]
 
 [tool.scikit-build]
 # Definir explicitamente a versão mínima do CMake
@@ -36,8 +33,6 @@ cmake.minimum-version = "3.15"
 # Configurações específicas do CMake
 cmake.source-dir = "c_src"
 cmake.build-type = "Release"
-# Passar o prefixo do Conda para ajudar o CMake a encontrar pacotes (como FFmpeg)
-cmake.args = ["-DCMAKE_PREFIX_PATH=${CONDA_PREFIX}"]
 
 # Configurações da Wheel
 # Mapeia o diretório de instalação do CMake para a raiz da wheel.

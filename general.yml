@@ -1,0 +1,14 @@
+name: general
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  # Deixar o Conda escolher a versão compatível
+  - ffmpeg
+  - opencv # Manter se o projeto general usa
+  - pip:
+      - paho-mqtt==1.6
+      # Remover a instalação pip da biblioteca por enquanto
+      # - git+https://github.com/leandrozanatta/camera-pipeline.git 
