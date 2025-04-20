@@ -53,6 +53,74 @@ foreach(_component ${FFmpeg_FIND_COMPONENTS})
 
     # O if(PC_${_COMPONENT_UPPER}_FOUND) abaixo continua como estava...
     if(PC_${_COMPONENT_UPPER}_FOUND)
-    # ... (resto da lógica do foreach como estava) ...
+        # --- Bloco if PC_COMPONENT_FOUND --- 
+        set(FFMPEG_${_COMPONENT_UPPER}_INCLUDE_DIRS ${PC_${_COMPONENT_UPPER}_INCLUDE_DIRS})
+        set(FFMPEG_${_COMPONENT_UPPER}_LIBRARY_DIRS ${PC_${_COMPONENT_UPPER}_LIBRARY_DIRS})
+        set(FFMPEG_${_COMPONENT_UPPER}_LIBRARIES ${PC_${_COMPONENT_UPPER}_LIBRARIES})
+        set(FFMPEG_${_COMPONENT_UPPER}_DEFINITIONS ${PC_${_COMPONENT_UPPER}_CFLAGS_OTHER}) # Pode precisar de parsing
+        set(_FFMPEG_COMPONENT_FOUND TRUE)
+        list(APPEND FFMPEG_INCLUDE_DIRS ${FFMPEG_${_COMPONENT_UPPER}_INCLUDE_DIRS})
+        list(APPEND FFMPEG_LIBRARY_DIRS ${FFMPEG_${_COMPONENT_UPPER}_LIBRARY_DIRS})
+        list(APPEND FFMPEG_LIBRARIES ${FFMPEG_${_COMPONENT_UPPER}_LIBRARIES})
+        list(APPEND FFMPEG_DEFINITIONS ${FFMPEG_${_COMPONENT_UPPER}_DEFINITIONS})
+        # --- Fim do Bloco if PC_COMPONENT_FOUND --- 
+    else()
+        # --- Bloco else (Fallback para find_library/find_path) ---
+        message(STATUS "Fallback para find_library/path para ${component}")
+        find_ffmpeg_library("lib${_component}" FFMPEG_${_COMPONENT_UPPER}_LIBRARY)
+        find_ffmpeg_include("${_component}.h" FFMPEG_${_COMPONENT_UPPER}_INCLUDE_DIR PATH_SUFFIXES "lib${_component}")
 
-endforeach() 
+        if(FFMPEG_${_COMPONENT_UPPER}_LIBRARY AND FFMPEG_${_COMPONENT_UPPER}_INCLUDE_DIR)
+            set(_FFMPEG_COMPONENT_FOUND TRUE)
+            list(APPEND FFMPEG_INCLUDE_DIRS ${FFMPEG_${_COMPONENT_UPPER}_INCLUDE_DIR})
+            set(FFMPEG_${_COMPONENT_UPPER}_DEFINITIONS "") # Nenhum conhecido aqui
+        endif()
+        # --- Fim do Bloco else --- 
+    endif()
+
+    if(_FFMPEG_COMPONENT_FOUND)
+        # --- Bloco if _FFMPEG_COMPONENT_FOUND (após pkg-config ou fallback) ---
+        list(APPEND _FFMPEG_FOUND_COMPONENTS ${_component})
+        # Define IMPORTED target (a lógica original aqui estava OK)
+        if(NOT TARGET FFmpeg::${_component})
+            add_library(FFmpeg::${_component} INTERFACE IMPORTED)
+            # Definir propriedades baseadas em PC_* ou FFMPEG_* 
+            if(PC_${_COMPONENT_UPPER}_FOUND)
+                if(PC_${_COMPONENT_UPPER}_INCLUDE_DIRS)
+                  set_target_properties(FFmpeg::${_component} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${PC_${_COMPONENT_UPPER}_INCLUDE_DIRS}")
+                endif()
+                # Para linkagem, usar os nomes das libs encontradas
+                if(PC_${_COMPONENT_UPPER}_LIBRARIES)
+                   set_property(TARGET FFmpeg::${_component} APPEND PROPERTY INTERFACE_LINK_LIBRARIES "${PC_${_COMPONENT_UPPER}_LIBRARIES}")
+                endif()
+                 # Para diretórios de bibliotecas
+                 if(PC_${_COMPONENT_UPPER}_LIBRARY_DIRS)
+                    set_property(TARGET FFmpeg::${_component} APPEND PROPERTY INTERFACE_LINK_DIRECTORIES "${PC_${_COMPONENT_UPPER}_LIBRARY_DIRS}")
+                endif()
+                # Para definições/flags (simplificado)
+                if(PC_${_COMPONENT_UPPER}_CFLAGS_OTHER)
+                   set_property(TARGET FFmpeg::${_component} APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "${PC_${_COMPONENT_UPPER}_CFLAGS_OTHER}")
+                endif()
+            elseif(FFMPEG_${_COMPONENT_UPPER}_LIBRARY)
+                # Se encontrado via find_library/path
+                set_target_properties(FFmpeg::${_component} PROPERTIES
+                    INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_${_COMPONENT_UPPER}_INCLUDE_DIR}"
+                    INTERFACE_LINK_LIBRARIES "${FFMPEG_${_COMPONENT_UPPER}_LIBRARY}"
+                )
+            endif()
+        endif()
+        set(FFmpeg_${_COMPONENT_UPPER}_FOUND TRUE)
+        # --- Fim do Bloco if _FFMPEG_COMPONENT_FOUND ---
+    else()
+         # --- Bloco else (Componente não encontrado nem via pkg-config nem fallback) ---
+        set(FFmpeg_${_COMPONENT_UPPER}_FOUND FALSE)
+        if(FFmpeg_FIND_REQUIRED_${_component})
+            message(FATAL_ERROR "Could not find FFmpeg component '${_component}'")
+        endif()
+         # --- Fim do Bloco else ---
+    endif()
+
+endforeach()
+
+# --- Final processing --- (como estava)
+# ... 
