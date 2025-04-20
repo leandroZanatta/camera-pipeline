@@ -33,8 +33,6 @@ cmake.minimum-version = "3.15"
 # Configurações específicas do CMake
 cmake.source-dir = "c_src"
 cmake.build-type = "Release"
-# Tentar definir FFmpeg_DIR usando expansão de env var
-cmake.args = ["-DFFmpeg_DIR=${ENV:CONDA_PREFIX}"]
 
 # Configurações da Wheel
 # Mapeia o diretório de instalação do CMake para a raiz da wheel.

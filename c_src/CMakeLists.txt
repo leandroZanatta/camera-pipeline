@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(camera_pipeline_c C)
 
+# Adicionar nosso diretório cmake ao path de módulos do CMake
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 # Configuração: usar FFmpeg (CMake padrão deve encontrar no Conda)
 option(USE_SYSTEM_FFMPEG "Usar FFmpeg do sistema" ON) # Pode remover esta opção agora
 
@@ -12,16 +15,14 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g" CACHE STRING "C flags for De
 # Encontrar pthreads (necessário para Linux/macOS)
 find_package(Threads REQUIRED)
 
-# --- Adicionar FFmpeg (Esperado do ambiente Conda agora) --- 
-# Remover pkg-config e usar find_package diretamente
+# --- Adicionar FFmpeg --- 
+# Remover pkg-config explícito daqui
 # find_package(PkgConfig REQUIRED) 
-# pkg_check_modules(AVFORMAT REQUIRED libavformat)
-# pkg_check_modules(AVCODEC REQUIRED libavcodec)
-# pkg_check_modules(AVUTIL REQUIRED libavutil)
-# pkg_check_modules(SWSCALE REQUIRED libswscale)
+# ... (linhas pkg_check_modules removidas)
 
-# Encontrar FFmpeg (deve encontrar a versão do Conda)
-find_package(FFmpeg REQUIRED COMPONENTS avformat avcodec avutil swscale)
+# Encontrar FFmpeg usando nosso FindFFmpeg.cmake via CMAKE_MODULE_PATH
+# A chamada agora usa o módulo que definimos
+find_package(FFmpeg REQUIRED)
 
 # Definir os arquivos fonte
 set(SOURCE_FILES
@@ -37,7 +38,7 @@ add_library(camera_pipeline_c SHARED ${SOURCE_FILES})
 # Adicionar diretório de includes
 target_include_directories(camera_pipeline_c PRIVATE 
     include # Nosso diretório de includes
-    ${FFMPEG_INCLUDE_DIRS} # Usar variável definida por find_package(FFmpeg)
+    ${FFMPEG_INCLUDE_DIRS} # Usar variável definida por nosso FindFFmpeg.cmake
 )
 
 # No Linux precisamos garantir que a biblioteca tenha o nome sem o prefixo "lib"
@@ -67,11 +68,8 @@ endif()
 # Lincar dependências (FFmpeg e Pthreads)
 target_link_libraries(camera_pipeline_c PRIVATE 
     Threads::Threads
-    # Usar targets importados fornecidos por find_package(FFmpeg)
-    FFmpeg::avformat
-    FFmpeg::avcodec
-    FFmpeg::avutil
-    FFmpeg::swscale
+    # Usar as bibliotecas encontradas pelo nosso FindFFmpeg.cmake
+    ${FFMPEG_LIBRARIES}
 )
 
 # Instalar a biblioteca no subdiretório correto relativo à raiz da instalação CMake
