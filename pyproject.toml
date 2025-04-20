@@ -33,10 +33,19 @@ dev = ["pytest>=7.4.2", "black>=23.9.1"]
 full = ["numpy>=1.26.4", "PySide6>=6.5.0", "pytest>=7.4.2", "black>=23.9.1"]
 
 [tool.scikit-build]
-cmake.source-dir = "c_src"
-wheel.install-dir = "camera_pipeline/core"
+# Diretório do CMakeLists.txt relativo a este arquivo
+cmake-source-dir = "c_src"
+# Mapeia o diretório de instalação do CMake para dentro da wheel
+# Tudo que o CMake instalar será colocado aqui.
+wheel-install-dir = "camera_pipeline/core"
+# Tentar descoberta automática de pacotes python primeiro
+# Se falhar, descomentar a linha abaixo:
 # packages = ["camera_pipeline"]
-# cmake.args = ["-DEXAMPLE_OPTION=ON"]
-# cmake.targets = ["camera_pipeline_c"]
-cmake.build-type = "Release"
-install.strip = False 
+# Opcional: passar args para CMake
+# cmake-args = ["-DEXAMPLE_OPTION=ON"] # Note a mudança para hífens aqui também
+# Opcional: definir targets CMake específicos para construir
+# cmake-targets = ["camera_pipeline_c"] # Note a mudança para hífens aqui também
+# Configuração de build (ex: Release, Debug)
+cmake-build-type = "Release"
+# Controla se binários na wheel são "stripped"
+wheel-strip = False # Manter símbolos de debug por enquanto 
