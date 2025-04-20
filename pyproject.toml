@@ -48,4 +48,4 @@ wheel-install-dir = "camera_pipeline/core"
 # Configuração de build (ex: Release, Debug)
 cmake-build-type = "Release"
 # Controla se binários na wheel são "stripped"
-wheel-strip = False # Manter símbolos de debug por enquanto 
+wheel-strip = False 
