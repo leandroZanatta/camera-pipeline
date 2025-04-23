@@ -10,7 +10,7 @@
 
 // --- Constantes --- 
 #ifndef MAX_CAMERAS
-#define MAX_CAMERAS 64 // Define um limite máximo razoável
+#define MAX_CAMERAS 128 // Define um limite máximo razoável
 #endif
 
 #ifndef MAX_URL_LENGTH
