@@ -62,15 +62,14 @@ typedef struct {
     int target_fps;
     int64_t target_interval_ns;  // Real-time pacing interval (nanoseconds)
     double estimated_source_fps;
+    double frame_skip_accumulator; // Acumulador fracionário para skip preciso
+    double frame_skip_ratio;      // Razão exata de skip (source_fps/target_fps)
     int frame_skip_count;        // Send 1 out of N frames (1 = send all)
     int frame_process_counter;   // Counter for processed frames
 
     // Fields for calculating actual output FPS
     struct timespec last_fps_calc_time; // Time of last FPS calculation
-    long frame_send_counter;           // Frames sent since last calculation
-    double calculated_output_fps;      // Last calculated output FPS
-    int64_t last_frame_time_ns;        // Timestamp of the last sent frame for pacing
-
+    
     int64_t last_sent_pts;           // PTS do último frame enviado para Python
 
     // Campos para timeout de inicialização
@@ -79,7 +78,17 @@ typedef struct {
 
     // Campo para interrupção de threads bloqueadas
     int interrupt_read_fd;       // Descritor de arquivo para interrupção via pipe
+    struct timespec last_frame_sent_time; 
+    // Campos para cálculo do FPS de SAÍDA (o que realmente enviamos para Python)
+    struct timespec last_output_fps_calc_time; // Tempo do último cálculo de FPS de SAÍDA
+    long frame_send_counter;                   // Frames enviados desde o último cálculo
+    double calculated_output_fps;              // Último FPS de saída calculado
 
+    // NOVO: Campos para cálculo do FPS de ENTRADA (o que a câmera está enviando, pós-decodificação)
+    long frame_input_counter;                  // Contagem de frames DECODIFICADOS (antes do skip)
+    double calculated_input_fps;               // Último FPS de entrada calculado
+    struct timespec last_input_fps_calc_time;  // Tempo do último cálculo de FPS de ENTRADA
+    bool has_real_fps_measurement;             // Indica se já temos medição real do FPS
 } camera_thread_context_t;
 
 #endif // CAMERA_CONTEXT_H 
