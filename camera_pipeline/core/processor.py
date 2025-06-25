@@ -438,9 +438,11 @@ class CameraProcessor:
     def stop_camera(self, camera_id: int) -> bool:
         """
         Solicita a parada de uma câmera específica via biblioteca C.
+        IMPORTANTE: Esta função agora aguarda a thread finalizar COM TIMEOUT DE SEGURANÇA (3s)
+        para evitar travamentos. Retorna True quando a câmera foi removida ou timeout atingido.
         Retorna: True se a C lib retornou 0 (sucesso), False caso contrário.
         """
-        logger.info(f"Solicitando parada para câmera ID {camera_id}...")
+        logger.info(f"Solicitando parada para câmera ID {camera_id} (com timeout de segurança)...")
         with self._state_lock:
             if camera_id not in self._active_cameras:
                 logger.warning(
@@ -453,27 +455,53 @@ class CameraProcessor:
             return False
 
         try:
+            logger.debug(f"Chamando processor_stop_camera (com timeout) para ID {camera_id}...")
             ret = self.c_lib.processor_stop_camera(camera_id)
             if ret == 0:
                 logger.info(
-                    f"Solicitação C de parada para ID {camera_id} enviada com sucesso."
+                    f"Câmera ID {camera_id} removida com sucesso (thread finalizada ou timeout de segurança)."
                 )
                 # O estado será atualizado pelo callback de status
 
                 # Remover os callbacks registrados E a entrada da câmera ativa
                 with self._state_lock:
+                    removed_items = []
                     if camera_id in self._active_cameras: # Verifica se realmente existe antes de tentar deletar
                         del self._active_cameras[camera_id]
+                        removed_items.append("active_cameras")
+                    if camera_id in self._frame_callbacks:
+                        del self._frame_callbacks[camera_id]
+                        removed_items.append("frame_callbacks")
+                    if camera_id in self._status_callbacks:
+                        del self._status_callbacks[camera_id]
+                        removed_items.append("status_callbacks")
+                    
+                    if removed_items:
+                        logger.debug(f"Estado Python limpo para ID {camera_id}: {', '.join(removed_items)}")
+
+                return True
+            elif ret == -1:
+                logger.error(f"Falha ao parar câmera ID {camera_id}: Processador C não inicializado.")
+                return False
+            elif ret == -2:
+                logger.warning(f"Falha ao parar câmera ID {camera_id}: ID inválido ou câmera já inativa.")
+                # Limpar estado Python mesmo assim, caso esteja inconsistente
+                with self._state_lock:
+                    if camera_id in self._active_cameras:
+                        del self._active_cameras[camera_id]
+                        logger.debug(f"Estado Python limpo para ID {camera_id} (ID inválido no C)")
                     if camera_id in self._frame_callbacks:
                         del self._frame_callbacks[camera_id]
                     if camera_id in self._status_callbacks:
                         del self._status_callbacks[camera_id]
-
-                return True
+                return False
+            elif ret == -3:
+                logger.error(f"Falha ao parar câmera ID {camera_id}: Erro na finalização da thread.")
+                return False
             else:
-                # Erros C: -1 (não inicializado), -2 (ID inválido/inativo)
+                # Erros C: outros códigos
                 logger.error(
-                    f"Falha ao solicitar parada C para ID {camera_id} (Erro {ret})."
+                    f"Falha ao parar câmera ID {camera_id}: Código de erro desconhecido ({ret})."
                 )
                 return False
         except Exception as e:
