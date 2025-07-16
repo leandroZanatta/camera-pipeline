@@ -479,6 +479,12 @@ class CameraProcessor:
                     if removed_items:
                         logger.debug(f"Estado Python limpo para ID {camera_id}: {', '.join(removed_items)}")
 
+                # Limpar o buffer de últimos frames para esta câmera
+                with self._latest_frames_lock:
+                    if camera_id in self._latest_frames:
+                        del self._latest_frames[camera_id]
+                        logger.debug(f"Buffer de últimos frames limpo para ID {camera_id}")
+
                 return True
             elif ret == -1:
                 logger.error(f"Falha ao parar câmera ID {camera_id}: Processador C não inicializado.")
@@ -494,6 +500,13 @@ class CameraProcessor:
                         del self._frame_callbacks[camera_id]
                     if camera_id in self._status_callbacks:
                         del self._status_callbacks[camera_id]
+                
+                # Limpar o buffer de últimos frames para esta câmera mesmo em caso de erro
+                with self._latest_frames_lock:
+                    if camera_id in self._latest_frames:
+                        del self._latest_frames[camera_id]
+                        logger.debug(f"Buffer de últimos frames limpo para ID {camera_id} (ID inválido no C)")
+                
                 return False
             elif ret == -3:
                 logger.error(f"Falha ao parar câmera ID {camera_id}: Erro na finalização da thread.")
