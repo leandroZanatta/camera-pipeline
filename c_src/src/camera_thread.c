@@ -177,9 +177,58 @@ static bool initialize_ffmpeg_connection(camera_thread_context_t* ctx, AVDiction
     }
 
     log_message(LOG_LEVEL_INFO, "[FFmpeg Init ID %d] Abrindo input: %s", ctx->camera_id, ctx->url);
-    int ret = avformat_open_input(&ctx->fmt_ctx, ctx->url, NULL, opts); // Passa opts aqui
+    
+    // Implementar retry automático para "Immediate exit requested"
+    int retry_count = 0;
+    const int max_retries = 3;
+    int ret;
+    
+    while (retry_count < max_retries) {
+        ret = avformat_open_input(&ctx->fmt_ctx, ctx->url, NULL, opts);
+        
+        if (ret == 0) {
+            // Sucesso na primeira tentativa
+            if (retry_count > 0) {
+                log_message(LOG_LEVEL_INFO, "[FFmpeg Init ID %d] Sucesso na tentativa %d após %d retries", 
+                           ctx->camera_id, retry_count + 1, retry_count);
+            }
+            break;
+        }
+        
+        // Verificar se é o erro específico "Immediate exit requested"
+        if (ret == AVERROR_EXIT || ret == -1414092869) {
+            retry_count++;
+            if (retry_count < max_retries) {
+                log_message(LOG_LEVEL_WARNING, "[FFmpeg Init ID %d] Retry %d/%d: Immediate exit requested, aguardando 1s...", 
+                           ctx->camera_id, retry_count, max_retries);
+                
+                // Aguardar 1 segundo antes de tentar novamente
+                struct timespec sleep_time = {1, 0}; // 1 segundo
+                nanosleep(&sleep_time, NULL);
+                
+                // Verificar se foi solicitado para parar durante o retry
+                if (ctx->stop_requested) {
+                    log_message(LOG_LEVEL_DEBUG, "[FFmpeg Init ID %d] Parada solicitada durante retry", ctx->camera_id);
+                    if (ctx->fmt_ctx) avformat_close_input(&ctx->fmt_ctx);
+                    ctx->fmt_ctx = NULL;
+                    av_dict_free(opts);
+                    *opts = NULL;
+                    return false;
+                }
+                continue;
+            } else {
+                log_message(LOG_LEVEL_ERROR, "[FFmpeg Init ID %d] Falha após %d tentativas: Immediate exit requested", 
+                           ctx->camera_id, max_retries);
+            }
+        } else {
+            // Outro tipo de erro, não tentar novamente
+            log_message(LOG_LEVEL_DEBUG, "[FFmpeg Init ID %d] Erro não é 'Immediate exit', não tentando retry", ctx->camera_id);
+            break;
+        }
+    }
+    
     if (ret < 0) {
-        log_ffmpeg_error(LOG_LEVEL_ERROR, "[FFmpeg Init ID %d] Falha ao abrir input", ret);
+        log_ffmpeg_error(LOG_LEVEL_ERROR, "[FFmpeg Init ID %d] Falha ao abrir input após retries", ret);
         if (ctx->fmt_ctx) avformat_close_input(&ctx->fmt_ctx); 
         ctx->fmt_ctx = NULL;
         av_dict_free(opts); // Liberar opts em caso de falha aqui
