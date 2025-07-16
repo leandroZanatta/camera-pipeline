@@ -80,6 +80,24 @@ static void interrupt_camera_thread(pthread_t thread_id) {
     }
 }
 
+// Nova função para limpar dados antigos do pipe compartilhado
+static void clear_interrupt_pipe() {
+    if (g_interrupt_pipe[0] != -1) {
+        // Ler e descartar todos os dados antigos do pipe
+        char buf[256];
+        int bytes_read;
+        do {
+            bytes_read = read(g_interrupt_pipe[0], buf, sizeof(buf));
+        } while (bytes_read > 0);
+        
+        if (bytes_read == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            log_message(LOG_LEVEL_WARNING, "[Pipe Clear] Erro ao limpar pipe: %s", strerror(errno));
+        } else {
+            log_message(LOG_LEVEL_DEBUG, "[Pipe Clear] Pipe compartilhado limpo antes de adicionar nova câmera");
+        }
+    }
+}
+
 // Função chamada pela thread da câmera para enviar um frame BGR processado
 void send_frame_to_python(void* camera_context) {
     camera_thread_context_t* ctx = (camera_thread_context_t*)camera_context;
@@ -278,7 +296,10 @@ int processor_add_camera(int camera_id,
     HASH_ADD_INT(g_camera_contexts, camera_id, context_entry);
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Contexto para câmera ID %d adicionado à tabela hash.", camera_id);
 
-    // 6. Criar a thread para este contexto
+    // 6. Limpar dados antigos do pipe compartilhado antes de criar a thread
+    clear_interrupt_pipe();
+    
+    // 7. Criar a thread para este contexto
     log_message(LOG_LEVEL_INFO, "[Processor API] Criando thread para câmera ID %d (URL: %s)", camera_id, url);
     int rc = pthread_create(&ctx->thread_id, NULL, run_camera_loop, ctx);
     
