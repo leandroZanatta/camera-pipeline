@@ -232,6 +232,9 @@ static bool initialize_ffmpeg_connection(camera_thread_context_t* ctx, AVDiction
         *opts = NULL;
         return false;
     }
+    
+    // Se chegou aqui, o retry infinito foi bem-sucedido!
+    log_message(LOG_LEVEL_INFO, "[FFmpeg Init ID %d] Retry infinito bem-sucedido!", ctx->camera_id);
     log_message(LOG_LEVEL_DEBUG, "[FFmpeg Init ID %d] avformat_open_input SUCESSO.", ctx->camera_id);
 
     log_message(LOG_LEVEL_DEBUG, "[FFmpeg Init ID %d] Buscando stream info...", ctx->camera_id);
@@ -239,7 +242,7 @@ static bool initialize_ffmpeg_connection(camera_thread_context_t* ctx, AVDiction
     av_dict_free(opts); // Liberar opts após o uso bem-sucedido ou falha de find_stream_info
     *opts = NULL;
     if (ret < 0) {
-        log_ffmpeg_error(LOG_LEVEL_ERROR, "[FFmpeg Init ID %d] Falha ao buscar stream info", ret);
+        log_ffmpeg_error(LOG_LEVEL_ERROR, "[FFmpeg Init ID %d] Falha ao buscar stream info (erro não retryável)", ret);
         if (ctx->fmt_ctx) avformat_close_input(&ctx->fmt_ctx);
         ctx->fmt_ctx = NULL;
         return false;
