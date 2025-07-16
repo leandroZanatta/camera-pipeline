@@ -98,6 +98,43 @@ static void clear_interrupt_pipe() {
     }
 }
 
+// Nova função para verificar se uma thread ainda está executando
+static bool is_thread_running(pthread_t thread_id) {
+    // Tentar join não-bloqueante para verificar se a thread ainda está ativa
+    int result = pthread_tryjoin_np(thread_id, NULL);
+    if (result == EBUSY) {
+        return true; // Thread ainda executando
+    } else if (result == 0) {
+        return false; // Thread já terminou
+    } else {
+        // Erro - assumir que não está executando
+        log_message(LOG_LEVEL_WARNING, "[Thread Check] Erro ao verificar thread: %s", strerror(result));
+        return false;
+    }
+}
+
+// Nova função para aguardar finalização de thread com timeout
+static bool wait_for_thread_completion(pthread_t thread_id, int camera_id, int timeout_seconds) {
+    log_message(LOG_LEVEL_INFO, "[Thread Wait] Aguardando finalização da thread anterior para câmera ID %d (timeout: %ds)...", camera_id, timeout_seconds);
+    
+    const int CHECK_INTERVAL_MS = 100; // 100ms
+    const int MAX_ATTEMPTS = (timeout_seconds * 1000) / CHECK_INTERVAL_MS;
+    
+    struct timespec wait_time = {0, CHECK_INTERVAL_MS * 1000000}; // 100ms em nanosegundos
+    
+    for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (!is_thread_running(thread_id)) {
+            log_message(LOG_LEVEL_INFO, "[Thread Wait] Thread anterior para câmera ID %d finalizada após %d tentativas.", camera_id, attempt + 1);
+            return true; // Thread finalizada
+        }
+        
+        nanosleep(&wait_time, NULL);
+    }
+    
+    log_message(LOG_LEVEL_WARNING, "[Thread Wait] TIMEOUT: Thread anterior para câmera ID %d não finalizou em %d segundos.", camera_id, timeout_seconds);
+    return false; // Timeout
+}
+
 // Função chamada pela thread da câmera para enviar um frame BGR processado
 void send_frame_to_python(void* camera_context) {
     camera_thread_context_t* ctx = (camera_thread_context_t*)camera_context;
@@ -249,8 +286,46 @@ int processor_add_camera(int camera_id,
         pthread_mutex_unlock(&contexts_mutex);
         return -4; // Erro: ID já em uso
     }
+    
+    // 3. Verificar se há uma thread anterior ainda executando (race condition)
+    // Procurar por threads órfãs que podem estar usando o mesmo ID
+    camera_context_hash_t *current, *tmp;
+    pthread_t orphaned_thread = 0;
+    bool found_orphaned_thread = false;
+    
+    HASH_ITER(hh, g_camera_contexts, current, tmp) {
+        if (current->camera_id == camera_id && current->context && current->context->active) {
+            // Encontrou uma thread ativa com o mesmo ID
+            orphaned_thread = current->context->thread_id;
+            found_orphaned_thread = true;
+            log_message(LOG_LEVEL_WARNING, "[Processor API] Encontrada thread órfã para câmera ID %d. Aguardando finalização...", camera_id);
+            break;
+        }
+    }
+    
+    // Se encontrou thread órfã, aguardar sua finalização
+    if (found_orphaned_thread) {
+        pthread_mutex_unlock(&contexts_mutex); // Desbloquear para permitir que a thread termine
+        
+        // Aguardar até 5 segundos para a thread anterior terminar
+        if (!wait_for_thread_completion(orphaned_thread, camera_id, 5)) {
+            log_message(LOG_LEVEL_ERROR, "[Processor API] Thread anterior para câmera ID %d não finalizou no tempo esperado. Abortando adição.", camera_id);
+            return -7; // Erro: Thread anterior não finalizou
+        }
+        
+        // Re-bloquear mutex para continuar
+        pthread_mutex_lock(&contexts_mutex);
+        
+        // Verificar novamente se o ID ainda está em uso
+        context_entry = find_context_by_id(camera_id);
+        if (context_entry) {
+            log_message(LOG_LEVEL_ERROR, "[Processor API] ID %d ainda em uso após aguardar thread anterior.", camera_id);
+            pthread_mutex_unlock(&contexts_mutex);
+            return -4; // Erro: ID ainda em uso
+        }
+    }
 
-    // MODIFICAÇÃO: 3. Alocar contexto e entrada de hash separadamente
+    // MODIFICAÇÃO: 4. Alocar contexto e entrada de hash separadamente
     // Primeiro alocamos o contexto
     camera_thread_context_t *ctx = (camera_thread_context_t*)malloc(sizeof(camera_thread_context_t));
     if (!ctx) {
@@ -268,7 +343,7 @@ int processor_add_camera(int camera_id,
         return -5; // Erro: Falha de alocação
     }
 
-    // 4. Inicializar o contexto
+    // 5. Inicializar o contexto
     memset(ctx, 0, sizeof(camera_thread_context_t));
     ctx->camera_id = camera_id;
     ctx->active = true;
@@ -292,14 +367,14 @@ int processor_add_camera(int camera_id,
     context_entry->camera_id = camera_id;
     context_entry->context = ctx;
 
-    // 5. Adicionar à tabela hash
+    // 6. Adicionar à tabela hash
     HASH_ADD_INT(g_camera_contexts, camera_id, context_entry);
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Contexto para câmera ID %d adicionado à tabela hash.", camera_id);
 
-    // 6. Limpar dados antigos do pipe compartilhado antes de criar a thread
+    // 7. Limpar dados antigos do pipe compartilhado antes de criar a thread
     clear_interrupt_pipe();
     
-    // 7. Criar a thread para este contexto
+    // 8. Criar a thread para este contexto
     log_message(LOG_LEVEL_INFO, "[Processor API] Criando thread para câmera ID %d (URL: %s)", camera_id, url);
     int rc = pthread_create(&ctx->thread_id, NULL, run_camera_loop, ctx);
     
