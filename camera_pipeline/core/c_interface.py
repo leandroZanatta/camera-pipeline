@@ -8,15 +8,11 @@ import sys
 logger = logging.getLogger(__name__)
 
 # Constantes de nível de log (espelho das definições C)
-LOG_LEVEL_QUIET = -8
-LOG_LEVEL_PANIC = 0
-LOG_LEVEL_FATAL = 8
-LOG_LEVEL_ERROR = 16
-LOG_LEVEL_WARNING = 24
-LOG_LEVEL_INFO = 32
-LOG_LEVEL_VERBOSE = 40
-LOG_LEVEL_DEBUG = 48
-LOG_LEVEL_TRACE = 56
+LOG_LEVEL_ERROR = 0
+LOG_LEVEL_WARNING = 1
+LOG_LEVEL_INFO = 2
+LOG_LEVEL_DEBUG = 3
+LOG_LEVEL_TRACE = 4
 
 # Constantes de formato de pixel (espelho das definições C)
 AV_PIX_FMT_NONE = -1

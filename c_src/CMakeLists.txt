@@ -25,6 +25,7 @@ set(SOURCE_FILES
     src/logger.c
     src/callback_utils.c
     src/camera_thread.c
+    src/frame_queue.c
 )
 
 # Criar a biblioteca compartilhada

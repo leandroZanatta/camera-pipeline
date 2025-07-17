@@ -16,6 +16,9 @@
 // Or redefine constants here if preferred, ensure consistency
 #include "camera_processor.h" // Provides MAX_URL_LENGTH and callback types
 
+// Include frame queue for thread-safe buffer
+#include "frame_queue.h"
+
 // Define camera states here if not defined elsewhere publicly
 typedef enum {
     CAM_STATE_STOPPED,
@@ -89,6 +92,14 @@ typedef struct {
     double calculated_input_fps;               // Último FPS de entrada calculado
     struct timespec last_input_fps_calc_time;  // Tempo do último cálculo de FPS de ENTRADA
     bool has_real_fps_measurement;             // Indica se já temos medição real do FPS
+
+    // --- NOVO: Buffer de frames decodificados ---
+    FrameQueue decoded_frame_queue; // Fila de frames para esta câmera
+    // --- FIM NOVO ---
+
+    // --- NOVO: ID da thread consumidora ---
+    pthread_t consumer_thread_id; 
+    // --- FIM NOVO ---
 } camera_thread_context_t;
 
 #endif // CAMERA_CONTEXT_H 

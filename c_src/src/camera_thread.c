@@ -4,6 +4,7 @@
 #include "logger.h"
 #include "callback_utils.h"
 #include "camera_context.h"
+#include "frame_queue.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +40,12 @@ double timespec_diff_s(struct timespec *start, struct timespec *end) {
 }
 
 #define CAMERA_ID 0 // ID fixo (considerar mover para o contexto ou remover se não for fixo)
+
+// Declaração da função externa para enviar frames para Python
+extern void send_frame_to_python(void* camera_context);
+
+// Declaração da função convert_and_dispatch_frame
+static bool convert_and_dispatch_frame(camera_thread_context_t* ctx, AVFrame* frame_to_convert);
 
 static inline int64_t get_monotonic_time_ns() { /* ... */ } // Esta função não foi fornecida, mantendo o placeholder
 
@@ -370,6 +377,111 @@ static bool allocate_packets_and_frames(camera_thread_context_t* ctx) {
     return true;
 }
 
+// --- CONSUMIDOR: Nova Thread para processar frames decodificados e chamar Python ---
+void* consume_frames_thread(void* arg) {
+    camera_thread_context_t* ctx = (camera_thread_context_t*)arg;
+    if (!ctx) {
+        log_message(LOG_LEVEL_ERROR, "[Consumer Thread] Contexto NULL recebido");
+        return NULL;
+    }
+    
+    log_message(LOG_LEVEL_INFO, "[Consumer Thread ID %d] Iniciando thread consumidora", ctx->camera_id);
+    
+    // Inicializar contadores para FPS de saída
+    ctx->frame_send_counter = 0;
+    clock_gettime(CLOCK_MONOTONIC, &ctx->last_output_fps_calc_time);
+    ctx->calculated_output_fps = 0.0;
+    
+    // Inicializar frame_bgr e sws_ctx para esta thread
+    ctx->frame_bgr = av_frame_alloc();
+    if (!ctx->frame_bgr) {
+        log_message(LOG_LEVEL_ERROR, "[Consumer Thread ID %d] Falha ao alocar frame_bgr", ctx->camera_id);
+        return NULL;
+    }
+    
+    ctx->sws_ctx = NULL;
+    ctx->sws_ctx_width = 0;
+    ctx->sws_ctx_height = 0;
+    ctx->sws_ctx_in_fmt = AV_PIX_FMT_NONE;
+    
+    while (!ctx->stop_requested) {
+        // Aguardar frame da fila
+        AVFrame* decoded_frame = frame_queue_pop(&ctx->decoded_frame_queue, &ctx->stop_requested);
+        
+        if (!decoded_frame) {
+            // Timeout ou fila vazia - continuar loop
+            continue;
+        }
+        
+        // Processar frame com pacing e FPS control
+        if (ctx->target_fps > 0) {
+            // Calcular intervalo entre frames
+            int64_t target_interval_ns = 1000000000LL / ctx->target_fps;
+            
+            // Verificar se é hora de enviar este frame
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            
+            if (ctx->frame_send_counter > 0) {
+                // Calcular tempo desde o último frame enviado
+                double elapsed_s = timespec_diff_s(&ctx->last_frame_sent_time, &now);
+                int64_t elapsed_ns = (int64_t)(elapsed_s * 1000000000.0);
+                
+                if (elapsed_ns < target_interval_ns) {
+                    // Ainda não é hora de enviar - aguardar
+                    int64_t sleep_ns = target_interval_ns - elapsed_ns;
+                    struct timespec sleep_time = {0, sleep_ns};
+                    nanosleep(&sleep_time, NULL);
+                    
+                    // Atualizar tempo atual após sleep
+                    clock_gettime(CLOCK_MONOTONIC, &now);
+                }
+            }
+            
+            // Atualizar tempo do último frame enviado
+            ctx->last_frame_sent_time = now;
+        }
+        
+        // Converter frame para BGR e enviar para Python
+        if (convert_and_dispatch_frame(ctx, decoded_frame)) {
+            ctx->frame_send_counter++;
+            
+            // Calcular FPS de saída a cada 5 segundos
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            double elapsed_s = timespec_diff_s(&ctx->last_output_fps_calc_time, &now);
+            
+            if (elapsed_s >= FPS_CALC_INTERVAL_S) {
+                ctx->calculated_output_fps = ctx->frame_send_counter / elapsed_s;
+                log_message(LOG_LEVEL_INFO, "[Consumer Thread ID %d] FPS de saída: %.2f (frames: %ld, tempo: %.2fs)", 
+                           ctx->camera_id, ctx->calculated_output_fps, ctx->frame_send_counter, elapsed_s);
+                
+                // Resetar contadores
+                ctx->frame_send_counter = 0;
+                ctx->last_output_fps_calc_time = now;
+            }
+        }
+        
+        // Liberar frame decodificado
+        av_frame_free(&decoded_frame);
+    }
+    
+    // Limpeza da thread consumidora
+    log_message(LOG_LEVEL_INFO, "[Consumer Thread ID %d] Finalizando thread consumidora", ctx->camera_id);
+    
+    if (ctx->sws_ctx) {
+        sws_freeContext(ctx->sws_ctx);
+        ctx->sws_ctx = NULL;
+    }
+    
+    if (ctx->frame_bgr) {
+        av_frame_free(&ctx->frame_bgr);
+        ctx->frame_bgr = NULL;
+    }
+    
+    return NULL;
+}
+
 
 // Converte o frame decodificado para BGR e chama o callback Python.
 static bool convert_and_dispatch_frame(camera_thread_context_t* ctx, AVFrame* frame_to_convert) {
@@ -625,98 +737,23 @@ static bool process_stream(camera_thread_context_t* ctx) {
                 }
                 // --- FIM DA MODIFICAÇÃO ---
                 
-                // --- LÓGICA FRAME SKIPPING --- 
-                ctx->frame_process_counter++; // Incrementa para cada frame DECODIFICADO
+                // --- NOVO: Adicionar frame à fila ---
+                log_message(LOG_LEVEL_DEBUG, "[Stream Processing ID %d] Adicionando frame à fila (PTS: %ld)",
+                            ctx->camera_id, ctx->decoded_frame->pts);
                 
-                // Atualizar acumulador com a parte fracionária
-                ctx->frame_skip_accumulator += 1.0;
-                
-                // Determinar se devemos enviar este frame
-                bool should_send = false;
-                if (ctx->frame_skip_ratio <= 1.0) {
-                    // Se a razão é <= 1, enviamos todos os frames
-                    should_send = true;
-                } else {
-                    // Se acumulamos o suficiente para um frame inteiro
-                    if (ctx->frame_skip_accumulator >= ctx->frame_skip_ratio) {
-                        should_send = true;
-                        // Subtrair um frame inteiro do acumulador
-                        ctx->frame_skip_accumulator -= ctx->frame_skip_ratio;
+                bool push_success = frame_queue_push(&ctx->decoded_frame_queue, ctx->decoded_frame, &ctx->stop_requested);
+                if (!push_success) {
+                    // Log menos verboso - apenas ocasionalmente
+                    static int push_fail_count = 0;
+                    push_fail_count++;
+                    if (push_fail_count % 20 == 0) {
+                        log_message(LOG_LEVEL_WARNING, "[Stream Processing ID %d] Falha ao adicionar frame à fila (fila cheia) - %d falhas", ctx->camera_id, push_fail_count);
                     }
                 }
-
-                log_message(LOG_LEVEL_DEBUG, "[Frame Skip ID %d] Frame %ld: Accumulator=%.3f, Ratio=%.3f, Send=%d", 
-                            ctx->camera_id, ctx->frame_process_counter, 
-                            ctx->frame_skip_accumulator, ctx->frame_skip_ratio, should_send);
-
-                if (should_send) {
-                    // Log de ENVIO
-                    log_message(LOG_LEVEL_INFO, "[Frame Skip ID %d] ENVIANDO frame (PTS: %ld)",
-                                ctx->camera_id, ctx->decoded_frame->pts);
-                                
-                    // CHAVE: O frame_decoded É consumido por convert_and_dispatch_frame, que também libera seu buffer
-                    bool callback_ok = convert_and_dispatch_frame(ctx, ctx->decoded_frame);
-                    av_frame_unref(ctx->decoded_frame); // Libera o frame *APÓS* o dispatch (se não foi movido, etc.)
-                                
-                    // Resetar contador APÓS envio bem sucedido
-                    ctx->frame_process_counter = 0;
-
-                    if (!callback_ok) { // Se o callback/conversão falhar, é um erro a ser tratado
-                        log_message(LOG_LEVEL_ERROR, "[Loop Leitura ID %d] Falha na conversão ou callback após seleção de frame.", ctx->camera_id);
-                        goto process_stream_error;
-                    }
-                    
-                    // --- Pacing (Tempo Real) APÓS envio --- 
-                    // O `last_frame_sent_time` é atualizado DENTRO de `convert_and_dispatch_frame`
-                    struct timespec now;
-                    clock_gettime(CLOCK_MONOTONIC, &now);
-                    long elapsed_since_last_sent_ns = (long)(timespec_diff_s(&ctx->last_frame_sent_time, &now) * 1e9);
-                    
-                    long sleep_needed_ns = ctx->target_interval_ns - elapsed_since_last_sent_ns;
-
-                    if (sleep_needed_ns > 0) {
-                        log_message(LOG_LEVEL_TRACE, "[Pacing ID %d] Necessário dormir por %ld ns para atingir Target FPS.", ctx->camera_id, sleep_needed_ns);
-                        struct timespec remaining_sleep = {0, sleep_needed_ns};
-                        struct timespec actual_slept; // Para nanosleep (segundo argumento)
-                        
-                        while (nanosleep(&remaining_sleep, &actual_slept) == -1 && errno == EINTR) {
-                            if (ctx->stop_requested) {
-                                log_message(LOG_LEVEL_DEBUG, "[Pacing ID %d] Parada solicitada durante nanosleep.", ctx->camera_id);
-                                return true; // Sair limpo
-                            }
-                            remaining_sleep = actual_slept; // Continue dormindo o restante após uma interrupção
-                            log_message(LOG_LEVEL_TRACE, "[Pacing ID %d] Nanosleep interrompido, %ld ns restantes.", ctx->camera_id, remaining_sleep.tv_nsec);
-                        }
-                    } else {
-                        log_message(LOG_LEVEL_TRACE, "[Pacing ID %d] Não é necessário dormir (à frente do Target FPS por %ld ns).", ctx->camera_id, -sleep_needed_ns);
-                    }
-
-                    // --- Calcular FPS de Saída --- 
-                    ctx->frame_send_counter++;
-                    // A `current_time` para cálculo de FPS de saída já está no `now`
-                    double elapsed_s_output = timespec_diff_s(&ctx->last_output_fps_calc_time, &now);
-
-                    if (elapsed_s_output >= FPS_CALC_INTERVAL_S) {
-                        if (elapsed_s_output > 0) { // Evitar divisão por zero
-                            ctx->calculated_output_fps = (double)ctx->frame_send_counter / elapsed_s_output;
-                            log_message(LOG_LEVEL_INFO, "[FPS Real ID %d] FPS de Saída Calculado (últimos %.1fs): %.2f", ctx->camera_id, elapsed_s_output, ctx->calculated_output_fps);
-                        } else {
-                            log_message(LOG_LEVEL_ERROR, "[FPS Real ID %d] Tempo decorrido para cálculo de FPS de saída é zero ou negativo (%.3f s).", ctx->camera_id, elapsed_s_output);
-                        }
-                        // Resetar para próximo cálculo
-                        ctx->frame_send_counter = 0;
-                        ctx->last_output_fps_calc_time = now;
-                    }
-                    // --- Fim Cálculo FPS de Saída ---
-
-                } else {
-                    // Log de SKIP
-                    log_message(LOG_LEVEL_DEBUG, "[Frame Skip ID %d] PULANDO frame (Contador %ld < Skip %d, PTS: %ld)",
-                                ctx->camera_id, ctx->frame_process_counter, ctx->frame_skip_count, ctx->decoded_frame->pts);
-                                
-                    // CORREÇÃO: Liberar decoded_frame ao pular
-                    av_frame_unref(ctx->decoded_frame);
-                }
+                
+                // Liberar frame decodificado após adicionar à fila
+                av_frame_unref(ctx->decoded_frame);
+                // --- FIM NOVO ---
 
                 // Alocar um novo decoded_frame para a próxima iteração do loop avcodec_receive_frame
                 ctx->decoded_frame = av_frame_alloc();
@@ -758,6 +795,14 @@ void* run_camera_loop(void* arg) {
     clock_gettime(CLOCK_MONOTONIC, &ctx->last_input_fps_calc_time);  // Para FPS de entrada
     clock_gettime(CLOCK_MONOTONIC, &ctx->last_frame_sent_time);      // Para pacing de saída
     // --- FIM DA MODIFICAÇÃO ---
+
+    // --- NOVO: Inicializar fila de frames ---
+    if (!frame_queue_init(&ctx->decoded_frame_queue, 0)) {
+        log_message(LOG_LEVEL_ERROR, "[Thread ID %d] Falha ao inicializar fila de frames", ctx->camera_id);
+        return NULL;
+    }
+    log_message(LOG_LEVEL_INFO, "[Thread ID %d] Fila de frames inicializada", ctx->camera_id);
+    // --- FIM NOVO ---
 
     ctx->state = CAM_STATE_CONNECTING; // Estado inicial
     ctx->last_sent_pts = AV_NOPTS_VALUE; // Inicializar PTS (se usado)
@@ -808,6 +853,15 @@ void* run_camera_loop(void* arg) {
         update_camera_status(ctx, CAM_STATE_CONNECTED, "Conectado");
         if (ctx->stop_requested) { log_message(LOG_LEVEL_DEBUG, "[Thread ID %d] Stop requested after connected status update.", ctx->camera_id); goto thread_exit_cleanup; }
 
+        // --- NOVO: Iniciar thread consumidora ---
+        int consumer_rc = pthread_create(&ctx->consumer_thread_id, NULL, consume_frames_thread, ctx);
+        if (consumer_rc != 0) {
+            log_message(LOG_LEVEL_ERROR, "[Thread ID %d] Falha ao criar thread consumidora: %s", ctx->camera_id, strerror(consumer_rc));
+            goto thread_exit_cleanup;
+        }
+        log_message(LOG_LEVEL_INFO, "[Thread ID %d] Thread consumidora iniciada", ctx->camera_id);
+        // --- FIM NOVO ---
+
         // --- Processar --- 
         bool stop_req = process_stream(ctx);
         if (stop_req) {
@@ -850,7 +904,32 @@ handle_reconnect:
 
 thread_exit_cleanup:
     log_message(LOG_LEVEL_INFO, "[Thread ID %d] Saindo do loop principal. Limpando final...", ctx->camera_id);
+    
+    // --- NOVO: Sinalizar e aguardar thread consumidora ---
+    if (ctx->consumer_thread_id) {
+        log_message(LOG_LEVEL_INFO, "[Thread ID %d] Sinalizando thread consumidora para parar...", ctx->camera_id);
+        ctx->stop_requested = true;
+        
+        // Sinalizar a fila para desbloquear a consumidora
+        pthread_cond_signal(&ctx->decoded_frame_queue.cond_not_empty);
+        
+        // Aguardar thread consumidora terminar
+        int join_rc = pthread_join(ctx->consumer_thread_id, NULL);
+        if (join_rc != 0) {
+            log_message(LOG_LEVEL_WARNING, "[Thread ID %d] Erro ao aguardar thread consumidora: %s", ctx->camera_id, strerror(join_rc));
+        } else {
+            log_message(LOG_LEVEL_INFO, "[Thread ID %d] Thread consumidora finalizada", ctx->camera_id);
+        }
+    }
+    // --- FIM NOVO ---
+    
     cleanup_ffmpeg_resources(ctx); // Passar ctx
+    
+    // --- NOVO: Destruir fila de frames ---
+    frame_queue_destroy(&ctx->decoded_frame_queue);
+    log_message(LOG_LEVEL_INFO, "[Thread ID %d] Fila de frames destruída", ctx->camera_id);
+    // --- FIM NOVO ---
+    
     update_camera_status(ctx, CAM_STATE_STOPPED, "Thread encerrada"); // Passar ctx
     log_message(LOG_LEVEL_INFO, "[Thread ID %d] Encerrada completamente.", ctx->camera_id);
     if (opts) av_dict_free(&opts); // Este opts não está sendo usado, pode ser removido
