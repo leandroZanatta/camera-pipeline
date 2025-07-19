@@ -796,17 +796,13 @@ void* run_camera_loop(void* arg) {
         return NULL; 
     }
     
-    // Inicializar logger para esta câmera se ainda não foi inicializado
-    static bool logger_initialized = false;
-    if (!logger_initialized) {
-        char log_filename[256];
-        snprintf(log_filename, sizeof(log_filename), "camera_pipeline_%d.log", ctx->camera_id);
-        if (logger_init(log_filename, 100, true)) { // 100MB max, performance tracking habilitado
-            logger_initialized = true;
-            log_message(LOG_LEVEL_INFO, "[Logger] Sistema de logging inicializado para câmera %d", ctx->camera_id);
-        } else {
-            log_message(LOG_LEVEL_WARNING, "[Logger] Falha ao inicializar logging em disco para câmera %d", ctx->camera_id);
-        }
+    // Inicializar logger para esta câmera
+    char log_filename[256];
+    snprintf(log_filename, sizeof(log_filename), "camera_pipeline_%d.log", ctx->camera_id);
+    if (logger_init(log_filename, 100, true)) { // 100MB max, performance tracking habilitado
+        log_message(LOG_LEVEL_INFO, "[Logger] Sistema de logging inicializado para câmera %d", ctx->camera_id);
+    } else {
+        log_message(LOG_LEVEL_WARNING, "[Logger] Falha ao inicializar logging em disco para câmera %d", ctx->camera_id);
     }
     
     log_message(LOG_LEVEL_INFO, "[Thread ID %d] Iniciada para URL: %s", ctx->camera_id, ctx->url);
