@@ -514,6 +514,7 @@ dispatch_cleanup_and_fail:
 static bool process_stream(camera_thread_context_t* ctx) {
     if (!ctx) return false;
     log_message(LOG_LEVEL_DEBUG, "[Stream Processing ID %d] Iniciando loop de processamento...", ctx->camera_id);
+    LOG_HEARTBEAT(ctx->camera_id, "stream_processor");
     int ret = 0;
 
     // --- MODIFICADO: Reiniciar o frame_process_counter ao entrar em process_stream ---
@@ -526,33 +527,66 @@ static bool process_stream(camera_thread_context_t* ctx) {
             return true; // Parada solicitada, não é um erro
         }
 
+        // --- Verificar paradas de processamento ---
+        if (check_processing_stall(ctx->camera_id, 30)) { // 30 segundos de timeout
+            log_message(LOG_LEVEL_ERROR, "[Stream Processing ID %d] PARADA CRÍTICA detectada - tentando recuperação", ctx->camera_id);
+            LOG_ACTIVITY(ctx->camera_id, "stall_recovery", 0.0);
+        }
+
         // --- Leitura --- 
+        struct timespec read_start, read_end;
+        clock_gettime(CLOCK_MONOTONIC, &read_start);
+        
         log_message(LOG_LEVEL_TRACE, "[Stream Processing ID %d] Aguardando av_read_frame...", ctx->camera_id);
         ret = av_read_frame(ctx->fmt_ctx, ctx->packet);
-        log_message(LOG_LEVEL_TRACE, "[Stream Processing ID %d] av_read_frame retornou %d", ctx->camera_id, ret);
+        
+        clock_gettime(CLOCK_MONOTONIC, &read_end);
+        double read_time_ms = timespec_diff_s(&read_start, &read_end) * 1000.0;
+        
+        log_message(LOG_LEVEL_TRACE, "[Stream Processing ID %d] av_read_frame retornou %d (%.2fms)", ctx->camera_id, ret, read_time_ms);
+        
+        // Log de atividade para tracking
+        if (ret >= 0) {
+            LOG_ACTIVITY(ctx->camera_id, "frame_read", read_time_ms);
+        } else {
+            LOG_ACTIVITY(ctx->camera_id, "error", 0.0);
+        }
 
         if (ret == AVERROR_EOF) {
             log_message(LOG_LEVEL_INFO, "[Stream Processing ID %d] Fim do stream (EOF).", ctx->camera_id);
+            LOG_ACTIVITY(ctx->camera_id, "eof", 0.0);
             return false; // Fim do stream, precisa reconectar (ou parar se stop_requested for true logo após)
         } else if (ret == AVERROR(EAGAIN)) {
             log_message(LOG_LEVEL_TRACE, "[Stream Processing ID %d] av_read_frame retornou EAGAIN, tentando novamente...", ctx->camera_id);
+            LOG_ACTIVITY(ctx->camera_id, "eagain", 0.0);
             av_packet_unref(ctx->packet);
             continue; // Tentar ler novamente
         } else if (ret < 0) {
             log_ffmpeg_error(LOG_LEVEL_ERROR, "[Stream Processing ID %d] Falha ao ler frame", ctx->camera_id);
+            LOG_ACTIVITY(ctx->camera_id, "error", 0.0);
             return false; // Erro de leitura, precisa reconectar
         }
 
         // --- Processamento do Pacote --- 
         if (ctx->packet->stream_index == ctx->video_stream_index) {
+            struct timespec decode_start, decode_end;
+            clock_gettime(CLOCK_MONOTONIC, &decode_start);
+            
             log_message(LOG_LEVEL_TRACE, "[Stream Processing ID %d] Enviando pacote (PTS: %ld)", ctx->camera_id, ctx->packet->pts);
             ret = avcodec_send_packet(ctx->codec_ctx, ctx->packet);
+            
+            clock_gettime(CLOCK_MONOTONIC, &decode_end);
+            double decode_time_ms = timespec_diff_s(&decode_start, &decode_end) * 1000.0;
+            
             // Consumir o pacote imediatamente após avcodec_send_packet
             av_packet_unref(ctx->packet); // Libera o pacote, seja qual for o resultado de send_packet
             
             if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
                  log_ffmpeg_error(LOG_LEVEL_WARNING, "[Stream Processing ID %d] Erro ao enviar pacote para decodificador", ctx->camera_id);
+                 LOG_ACTIVITY(ctx->camera_id, "warning", 0.0);
                  // Continuar para tentar receber frames que já possam estar no buffer, mas logar o aviso
+            } else {
+                LOG_ACTIVITY(ctx->camera_id, "packet_decode", decode_time_ms);
             }
 
             // --- Loop de Recebimento de Frames --- 
@@ -575,12 +609,16 @@ static bool process_stream(camera_thread_context_t* ctx) {
                 }
                 if (ret < 0) {
                     log_ffmpeg_error(LOG_LEVEL_ERROR, "[Stream Processing ID %d] Falha ao receber frame", ctx->camera_id);
+                    LOG_ACTIVITY(ctx->camera_id, "error", 0.0);
                     goto process_stream_error; 
                 }
 
                 // CORREÇÃO: Usar decoded_frame nas validações e logs
                 log_message(LOG_LEVEL_DEBUG, "[Stream Processing ID %d] Frame DECODIFICADO. PTS: %ld", 
                             ctx->camera_id, ctx->decoded_frame->pts);
+                
+                // Log de atividade para frame decodificado
+                LOG_ACTIVITY(ctx->camera_id, "frame", 0.0);
                 
                 // --- MODIFICADO: Contagem de frames decodificados para medição de FPS de entrada ---
                 ctx->frame_input_counter++;
@@ -653,16 +691,27 @@ static bool process_stream(camera_thread_context_t* ctx) {
                     // Log de ENVIO
                     log_message(LOG_LEVEL_INFO, "[Frame Skip ID %d] ENVIANDO frame (PTS: %ld)",
                                 ctx->camera_id, ctx->decoded_frame->pts);
+                    
+                    struct timespec dispatch_start, dispatch_end;
+                    clock_gettime(CLOCK_MONOTONIC, &dispatch_start);
                                 
                     // CHAVE: O frame_decoded É consumido por convert_and_dispatch_frame, que também libera seu buffer
                     bool callback_ok = convert_and_dispatch_frame(ctx, ctx->decoded_frame);
+                    
+                    clock_gettime(CLOCK_MONOTONIC, &dispatch_end);
+                    double dispatch_time_ms = timespec_diff_s(&dispatch_start, &dispatch_end) * 1000.0;
+                    
                     av_frame_unref(ctx->decoded_frame); // Libera o frame *APÓS* o dispatch (se não foi movido, etc.)
+                    
+                    // Log de atividade para dispatch
+                    LOG_ACTIVITY(ctx->camera_id, "frame_dispatch", dispatch_time_ms);
                                 
                     // Resetar contador APÓS envio bem sucedido
                     ctx->frame_process_counter = 0;
 
                     if (!callback_ok) { // Se o callback/conversão falhar, é um erro a ser tratado
                         log_message(LOG_LEVEL_ERROR, "[Loop Leitura ID %d] Falha na conversão ou callback após seleção de frame.", ctx->camera_id);
+                        LOG_ACTIVITY(ctx->camera_id, "error", 0.0);
                         goto process_stream_error;
                     }
                     
@@ -746,6 +795,20 @@ void* run_camera_loop(void* arg) {
         log_message(LOG_LEVEL_ERROR, "[Thread] Argumento de contexto NULO recebido! Abortando.");
         return NULL; 
     }
+    
+    // Inicializar logger para esta câmera se ainda não foi inicializado
+    static bool logger_initialized = false;
+    if (!logger_initialized) {
+        char log_filename[256];
+        snprintf(log_filename, sizeof(log_filename), "camera_pipeline_%d.log", ctx->camera_id);
+        if (logger_init(log_filename, 100, true)) { // 100MB max, performance tracking habilitado
+            logger_initialized = true;
+            log_message(LOG_LEVEL_INFO, "[Logger] Sistema de logging inicializado para câmera %d", ctx->camera_id);
+        } else {
+            log_message(LOG_LEVEL_WARNING, "[Logger] Falha ao inicializar logging em disco para câmera %d", ctx->camera_id);
+        }
+    }
+    
     log_message(LOG_LEVEL_INFO, "[Thread ID %d] Iniciada para URL: %s", ctx->camera_id, ctx->url);
     
     // Calcular o intervalo de pacing aqui, baseado no target_fps definido no contexto
@@ -809,6 +872,7 @@ void* run_camera_loop(void* arg) {
         if (ctx->stop_requested) { log_message(LOG_LEVEL_DEBUG, "[Thread ID %d] Stop requested after connected status update.", ctx->camera_id); goto thread_exit_cleanup; }
 
         // --- Processar --- 
+        LOG_HEARTBEAT(ctx->camera_id, "main_loop");
         bool stop_req = process_stream(ctx);
         if (stop_req) {
             goto thread_exit_cleanup; // Sair limpo se process_stream pediu parada
