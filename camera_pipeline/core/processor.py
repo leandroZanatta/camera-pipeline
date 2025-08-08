@@ -55,7 +55,7 @@ class CameraProcessor:
     Gerencia a interação com a biblioteca C para processar streams de múltiplas câmeras.
     """
 
-    def __init__(self, c_log_level=LOG_LEVEL_INFO):
+    def __init__(self, c_log_level=LOG_LEVEL_INFO, auto_reconnect=True, reconnect_interval=30):
         if not IS_INTERFACE_READY:
             logger.critical(
                 "Biblioteca C não está carregada ou inicializada corretamente. Saindo."
@@ -81,8 +81,19 @@ class CameraProcessor:
         self._c_status_callback_ref = STATUS_CALLBACK_FUNC_TYPE(self._c_status_callback)
         self._c_frame_callback_ref = FRAME_CALLBACK_FUNC_TYPE(self._c_frame_callback)
 
+        # Configurações de reconexão automática
+        self._auto_reconnect = auto_reconnect
+        self._reconnect_interval = reconnect_interval  # segundos
+        self._monitor_thread = None
+        self._monitor_running = False
+        self._last_reconnect_attempt = {}  # Rastrear última tentativa de reconexão por câmera
+
         # Inicializar a biblioteca C
         self.initialize_c_library()
+        
+        # Iniciar thread de monitoramento se auto_reconnect estiver habilitado
+        if self._auto_reconnect:
+            self._start_monitor_thread()
 
     # Propriedade para compatibilidade com código anterior
     @property
@@ -438,9 +449,14 @@ class CameraProcessor:
     def stop_camera(self, camera_id: int) -> bool:
         """
         Solicita a parada de uma câmera específica via biblioteca C.
-        IMPORTANTE: Esta função agora aguarda a thread finalizar COM TIMEOUT DE SEGURANÇA (3s)
-        para evitar travamentos. Retorna True quando a câmera foi removida ou timeout atingido.
-        Retorna: True se a C lib retornou 0 (sucesso), False caso contrário.
+        IMPORTANTE: Esta função sempre remove completamente a câmera do sistema,
+        pois representa uma ação explícita do usuário para parar a câmera.
+        
+        Args:
+            camera_id: ID da câmera a ser parada
+        
+        Retorna:
+            True se a C lib retornou 0 (sucesso), False caso contrário.
         """
         logger.info(f"Solicitando parada para câmera ID {camera_id} (com timeout de segurança)...")
         with self._state_lock:
@@ -459,10 +475,11 @@ class CameraProcessor:
             ret = self.c_lib.processor_stop_camera(camera_id)
             if ret == 0:
                 logger.info(
-                    f"Câmera ID {camera_id} removida com sucesso (thread finalizada ou timeout de segurança)."
+                    f"Câmera ID {camera_id} parada com sucesso (thread finalizada ou timeout de segurança)."
                 )
                 # O estado será atualizado pelo callback de status
 
+                # Remover completamente a câmera do sistema (ação explícita do usuário)
                 # Remover os callbacks registrados E a entrada da câmera ativa
                 with self._state_lock:
                     removed_items = []
@@ -526,6 +543,12 @@ class CameraProcessor:
     def shutdown(self):
         """Desliga o processador C e limpa recursos Python."""
         logger.info("Iniciando desligamento do CameraProcessor (Python)...")
+        
+        # Parar a thread de monitoramento primeiro
+        if self._auto_reconnect and self._monitor_thread is not None:
+            logger.info("Parando thread de monitoramento...")
+            self._stop_monitor_thread()
+        
         # Chamar shutdown C primeiro
         if self._processor_initialized and self.c_lib:
             logger.info("Chamando processor_shutdown na biblioteca C...")
@@ -551,6 +574,7 @@ class CameraProcessor:
             self._frame_callbacks.clear()
             self._status_callbacks.clear()
             self._processor_initialized = False
+            self._last_reconnect_attempt.clear()
 
         # Limpar o buffer de últimos frames
         with self._latest_frames_lock:
@@ -575,3 +599,239 @@ class CameraProcessor:
             logger.info(f"Fila '{name}' limpa ({cleared_count} itens removidos).")
 
         logger.info("Desligamento do CameraProcessor (Python) concluído.")
+        
+    # --- Funções de Monitoramento e Reconexão Automática ---
+    
+    def _start_monitor_thread(self):
+        """Inicia a thread de monitoramento para reconexão automática."""
+        if self._monitor_thread is not None and self._monitor_thread.is_alive():
+            logger.warning("Thread de monitoramento já está em execução.")
+            return
+            
+        self._monitor_running = True
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_cameras,
+            name="CameraMonitor",
+            daemon=True  # Thread daemon para não bloquear encerramento do programa
+        )
+        self._monitor_thread.start()
+        logger.info(f"Thread de monitoramento iniciada (intervalo: {self._reconnect_interval}s)")
+    
+    def _stop_monitor_thread(self):
+        """Para a thread de monitoramento."""
+        if self._monitor_thread is None or not self._monitor_thread.is_alive():
+            logger.debug("Thread de monitoramento não está em execução.")
+            return
+            
+        logger.info("Solicitando parada da thread de monitoramento...")
+        self._monitor_running = False
+        
+        # Aguardar a thread terminar com timeout
+        self._monitor_thread.join(timeout=3.0)
+        if self._monitor_thread.is_alive():
+            logger.warning("Thread de monitoramento não terminou no timeout. Continuando mesmo assim.")
+        else:
+            logger.info("Thread de monitoramento encerrada com sucesso.")
+            
+        self._monitor_thread = None
+    
+    def _monitor_cameras(self):
+        """
+        Função principal da thread de monitoramento.
+        Verifica periodicamente câmeras desconectadas e tenta reconectá-las.
+        """
+        logger.info("Thread de monitoramento de câmeras iniciada.")
+        
+        while self._monitor_running:
+            try:
+                # Verificar câmeras desconectadas
+                disconnected_cameras = []
+                
+                with self._state_lock:
+                    # Verificar apenas se o processador está inicializado
+                    if not self._processor_initialized:
+                        time.sleep(self._reconnect_interval)
+                        continue
+                        
+                    # Coletar câmeras desconectadas
+                    current_time = time.time()
+                    for camera_id, camera_info in self._active_cameras.items():
+                        if camera_info["status"] == STATUS_DISCONNECTED:
+                            # Verificar se já passou tempo suficiente desde a última tentativa
+                            last_attempt = self._last_reconnect_attempt.get(camera_id, 0)
+                            if current_time - last_attempt >= self._reconnect_interval:
+                                disconnected_cameras.append((camera_id, camera_info))
+                
+                # Tentar reconectar câmeras desconectadas
+                for camera_id, camera_info in disconnected_cameras:
+                    logger.info(f"Tentando reconectar câmera ID {camera_id}...")
+                    self._last_reconnect_attempt[camera_id] = time.time()
+                    
+                    # Tentar reconectar
+                    success = self._reconnect_camera(camera_id, camera_info)
+                    if success:
+                        logger.info(f"Câmera ID {camera_id} reconectada com sucesso.")
+                    else:
+                        logger.warning(f"Falha ao reconectar câmera ID {camera_id}. Tentando novamente em {self._reconnect_interval}s.")
+                
+                # Dormir até o próximo ciclo
+                time.sleep(self._reconnect_interval)
+                
+            except Exception as e:
+                logger.exception(f"Erro na thread de monitoramento: {e}")
+                time.sleep(self._reconnect_interval)  # Continuar mesmo após erro
+        
+        logger.info("Thread de monitoramento de câmeras encerrada.")
+    
+    def _reconnect_camera(self, camera_id, camera_info):
+        """
+        Tenta reconectar uma câmera desconectada.
+        
+        Args:
+            camera_id: ID da câmera a reconectar
+            camera_info: Informações da câmera do dicionário _active_cameras
+            
+        Returns:
+            bool: True se reconectada com sucesso, False caso contrário
+        """
+        try:
+            # Verificar se temos todas as informações necessárias
+            if "url" not in camera_info:
+                logger.error(f"URL não encontrada para câmera ID {camera_id}")
+                return False
+                
+            url = camera_info["url"]
+            target_fps = camera_info.get("target_fps", 1)
+            
+            # Verificar se os callbacks ainda existem
+            if camera_id not in self._frame_callbacks:
+                logger.error(f"Callback de frame não encontrado para câmera ID {camera_id}")
+                return False
+                
+            frame_callback = self._frame_callbacks[camera_id]
+            status_callback = self._status_callbacks.get(camera_id)
+            
+            # Primeiro, garantir que a câmera está completamente parada no lado C
+            logger.debug(f"Parando thread C da câmera ID {camera_id} antes de reconectar...")
+            # Chamar diretamente a função C para parar a thread, sem remover do sistema Python
+            self.c_lib.processor_stop_camera(camera_id)
+            
+            # Pequena pausa para garantir que a câmera foi parada
+            time.sleep(1.0)
+            
+            # Tentar registrar a câmera novamente com o mesmo ID
+            logger.info(f"Registrando câmera ID {camera_id} novamente com URL: {url}")
+            ret = self.register_camera(
+                camera_id=camera_id,
+                url=url,
+                frame_callback=frame_callback,
+                status_callback=status_callback,
+                target_fps=target_fps
+            )
+            
+            return ret == 0  # Sucesso se register_camera retornar 0
+            
+        except Exception as e:
+            logger.exception(f"Erro ao tentar reconectar câmera ID {camera_id}: {e}")
+            return False
+    
+    def set_auto_reconnect(self, enabled, interval=None):
+        """
+        Ativa ou desativa a reconexão automática.
+        
+        Args:
+            enabled: True para ativar, False para desativar
+            interval: Intervalo de reconexão em segundos (opcional)
+        """
+        if interval is not None and interval > 0:
+            self._reconnect_interval = interval
+            
+        if enabled and not self._auto_reconnect:
+            self._auto_reconnect = True
+            self._start_monitor_thread()
+            logger.info(f"Reconexão automática ativada (intervalo: {self._reconnect_interval}s)")
+        elif not enabled and self._auto_reconnect:
+            self._auto_reconnect = False
+            self._stop_monitor_thread()
+            logger.info("Reconexão automática desativada")
+            
+    def handle_camera_failure(self, camera_id, reason="Falha técnica detectada"):
+        """
+        Marca uma câmera como desconectada devido a falha técnica (stream, decodificação, etc.),
+        mas mantém ela no sistema para reconexão automática.
+        
+        Args:
+            camera_id: ID da câmera com falha
+            reason: Motivo da falha (para logging)
+            
+        Returns:
+            bool: True se a câmera foi marcada como desconectada, False caso contrário
+        """
+        logger.info(f"Registrando falha técnica para câmera ID {camera_id}: {reason}")
+        
+        with self._state_lock:
+            if camera_id not in self._active_cameras:
+                logger.warning(f"Câmera ID {camera_id} não encontrada para registrar falha.")
+                return False
+                
+            # Parar a thread C da câmera, mas manter no sistema Python
+            # Chamar diretamente a função C para parar a thread
+            ret = self.c_lib.processor_stop_camera(camera_id)
+            
+            if ret == 0:
+                # Marcar como desconectada, mas manter no sistema para reconexão
+                self._active_cameras[camera_id]["status"] = STATUS_DISCONNECTED
+                logger.info(f"Câmera ID {camera_id} marcada como desconectada devido a falha. Será reconectada automaticamente.")
+                return True
+            else:
+                logger.error(f"Falha ao parar thread da câmera ID {camera_id} após falha técnica: {ret}")
+                return False
+    
+    def force_camera_disconnect(self, camera_id):
+        """
+        Força a desconexão de uma câmera para testar o mecanismo de reconexão.
+        Útil para testes e depuração.
+        
+        Args:
+            camera_id: ID da câmera a ser desconectada
+            
+        Returns:
+            bool: True se a câmera foi desconectada com sucesso, False caso contrário
+        """
+        logger.info(f"Forçando desconexão da câmera ID {camera_id} para teste...")
+        
+        # Usar o método handle_camera_failure para marcar como desconectada
+        # mas manter no sistema para reconexão automática
+        return self.handle_camera_failure(camera_id, "Desconexão forçada para teste")
+            
+    def get_camera_status(self, camera_id=None):
+        """
+        Retorna o status atual de uma câmera ou de todas as câmeras.
+        
+        Args:
+            camera_id: ID da câmera específica ou None para todas
+            
+        Returns:
+            dict: Status da câmera ou dicionário com status de todas as câmeras
+        """
+        with self._state_lock:
+            if camera_id is not None:
+                if camera_id in self._active_cameras:
+                    return {
+                        "camera_id": camera_id,
+                        "status": self._active_cameras[camera_id]["status"],
+                        "url": self._active_cameras[camera_id]["url"],
+                        "active": camera_id in self._active_cameras
+                    }
+                else:
+                    return {"camera_id": camera_id, "status": "not_found", "active": False}
+            else:
+                # Retornar status de todas as câmeras
+                result = {}
+                for cam_id, info in self._active_cameras.items():
+                    result[cam_id] = {
+                        "status": info["status"],
+                        "url": info["url"],
+                        "active": True
+                    }
+                return result

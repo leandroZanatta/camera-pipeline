@@ -89,6 +89,21 @@ typedef struct {
     double calculated_input_fps;               // Último FPS de entrada calculado
     struct timespec last_input_fps_calc_time;  // Tempo do último cálculo de FPS de ENTRADA
     bool has_real_fps_measurement;             // Indica se já temos medição real do FPS
+
+    // NOVO: Sincronização baseada em PTS
+    double pts_time_base;                      // time_base do stream em segundos por unidade de PTS
+    int64_t first_pts;                         // Primeiro PTS observado (para ancoragem)
+    struct timespec playback_anchor_mono;      // Tempo monotônico correspondente ao first_pts
+    double last_sent_pts_sec;                  // PTS do último frame enviado em segundos
+
+    // NOVO: Thresholds configuráveis (segundos)
+    double early_sleep_threshold_sec;          // quanto adiantado precisa estar para dormir (p.ex. 0.05)
+    double lateness_catchup_threshold_sec;     // atraso acima do qual não dorme (p.ex. 0.20)
+    double pts_jump_reset_threshold_sec;       // salto de PTS que gatilha realinhamento de âncora (p.ex. 1.0)
+    double stall_timeout_sec;                  // tempo sem atividade para forçar reconexão (p.ex. 30.0)
+
+    // NOVO: Marcação de última atividade para detecção de stall
+    struct timespec last_activity_mono;
 } camera_thread_context_t;
 
 #endif // CAMERA_CONTEXT_H 

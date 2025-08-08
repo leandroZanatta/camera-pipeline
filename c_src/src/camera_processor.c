@@ -26,6 +26,7 @@
 #include <libswscale/swscale.h>
 #include <libavutil/frame.h> 
 #include <libavutil/pixfmt.h> 
+#include <libavutil/log.h>
 
 // Definições de constantes
 #define THREAD_JOIN_TIMEOUT_SEC 3  // Timeout para join de threads (segundos)
@@ -208,6 +209,9 @@ int processor_initialize(void)
     
     log_message(LOG_LEVEL_DEBUG, "[Processor API] Inicializando hash de contextos para IDs dinâmicos");
     g_camera_contexts = NULL; 
+
+    // Silenciar completamente logs do FFmpeg
+    av_log_set_level(AV_LOG_QUIET);
 
     // Criar pipe para sinalização de interrupção
     if (pipe(g_interrupt_pipe) == -1) {

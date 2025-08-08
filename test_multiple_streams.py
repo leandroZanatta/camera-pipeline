@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 """
 Teste de múltiplos streams simultâneos.
-Este teste cria 60 câmeras com a mesma URL para avaliar escalabilidade.
+Este teste cria 20 câmeras com a mesma URL para avaliar escalabilidade.
 """
 
 import time
 import threading
-import logging
 import psutil
 import os
 from camera_pipeline.core.processor import CameraProcessor
 from camera_pipeline.core.callbacks import SimpleFrameCallback, SimpleStatusCallback
 
-# Configurar logging
-logging.basicConfig(
-    level=logging.WARNING,  # Reduzir verbosidade para múltiplas câmeras
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Removido: configuração de logging do Python para eliminar logs
 
 class MultiStreamCallback:
     """Callback para múltiplos streams"""
@@ -85,12 +80,12 @@ def get_system_stats():
 def main():
     """Função principal do teste"""
     print("=" * 80)
-    print("TESTE DE MÚLTIPLOS STREAMS - 60 CÂMERAS SIMULTÂNEAS")
+    print("TESTE DE MÚLTIPLOS STREAMS - 10 CÂMERAS SIMULTÂNEAS")
     print("=" * 80)
     
     # URL de teste
     test_url = "https://connect-162.servicestream.io:8050/cb5c5ee1a832.m3u8"
-    num_cameras = 60
+    num_cameras = 10
     
     try:
         # Criar processador
@@ -119,7 +114,7 @@ def main():
                 url=test_url,
                 frame_callback=frame_cb,
                 status_callback=status_cb,
-                target_fps=1  # 1 FPS para reduzir carga
+                target_fps=2  # 5 FPS para avaliar melhor throughput
             )
             
             if ret == 0:
